@@ -35,20 +35,12 @@
   <script type="text/babel">
     const { useState, useEffect } = React;
 
-    // --- CREDENCIALES DE SUPABASE ---
+    // CREDENCIALES DE SUPABASE
     const SUPABASE_URL = "https://waueklmhwysbeqmbbmve.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhdWVrbG1od3lzYmVxbWJibXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5MTY0MzYsImV4cCI6MjEwNzQ5MjQzNn0.tRM1m_2Atx8bujtk7udNTF8oE6nbnXSHFtQJXmaqV3E";
-    
-    let supabase = null;
-    try {
-      if (window.supabase) {
-        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      }
-    } catch(e) {
-      console.error("Error al inicializar Supabase:", e);
-    }
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // --- COMPONENTES DE ÍCONOS SVG ---
+    // ÍCONOS
     const IconWrapper = ({ children, className = "w-4 h-4" }) => (
       <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {children}
@@ -101,16 +93,13 @@
       const [savingEdit, setSavingEdit] = useState(false);
       const [successMsg, setSuccessMsg] = useState('');
 
-      // Modales
       const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
       const [editingIncident, setEditingIncident] = useState(null);
 
-      // Catalogo State
       const [newSucursal, setNewSucursal] = useState('');
       const [newReporto, setNewReporto] = useState('');
       const [newEvent, setNewEvent] = useState('');
 
-      // Form State
       const [formData, setFormData] = useState({
         fecha: new Date().toISOString().split('T')[0],
         horaForm: new Date().toTimeString().slice(0, 5),
@@ -126,14 +115,11 @@
         fotosVehiculo: null
       });
 
-      // Filter State
       const [searchTerm, setSearchTerm] = useState('');
       const [filterSucursal, setFilterSucursal] = useState('ALL');
       const [filterEvento, setFilterEvento] = useState('ALL');
 
-      // --- OBTENER INCIDENCIAS ---
       const fetchIncidentsFromSupabase = async () => {
-        if (!supabase) return;
         setLoadingData(true);
         try {
           const { data, error } = await supabase
@@ -141,7 +127,9 @@
             .select('*')
             .order('created_at', { ascending: false });
 
-          if (data) {
+          if (error) {
+            showToast("Error al cargar datos: " + error.message, "error");
+          } else if (data) {
             const mapped = data.map((i) => ({
               id: i.id,
               fecha: i.fecha,
@@ -161,7 +149,7 @@
             setIncidents(mapped);
           }
         } catch (e) {
-          console.error("Error al cargar incidencias:", e);
+          console.error(e);
         } finally {
           setLoadingData(false);
         }
@@ -173,15 +161,15 @@
 
       const showToast = (message, type = 'info') => {
         setToast({ message, type });
-        setTimeout(() => setToast(null), 3500);
+        setTimeout(() => setToast(null), 4000);
       };
 
       const handleFileUpload = (e, fieldKey, isEditing = false) => {
         const file = e.target.files[0];
         if (!file) return;
 
-        if (file.size > 12 * 1024 * 1024) {
-          showToast("El archivo excede el tamaño máximo de 12MB.", "error");
+        if (file.size > 8 * 1024 * 1024) {
+          showToast("El archivo excede el límite de 8MB.", "error");
           return;
         }
 
@@ -197,7 +185,7 @@
         reader.readAsDataURL(file);
       };
 
-      const handleAddCatalogItem = (category, value, resetSetter, categoryLabel) => {
+      const handleAddCatalogItem = (category, value, resetSetter) => {
         if (!value || !value.trim()) return;
         const trimmedVal = value.trim();
         const currentList = catalogs[category] || [];
@@ -227,7 +215,7 @@
           setIsAdminLoggedIn(true);
           setLoginError('');
           setAdminPassword('');
-          showToast("Sesión de administrador iniciada", "success");
+          showToast("Sesión iniciada como Admin", "success");
           setActiveTab('formulario');
         } else {
           setLoginError('Usuario o contraseña incorrectos.');
@@ -239,7 +227,6 @@
         showToast("Sesión de administrador cerrada", "info");
       };
 
-      // --- GUARDAR REPORTE EN SUPABASE ---
       const handleSubmitForm = async (e) => {
         e.preventDefault();
         setSubmitting(true);
@@ -264,19 +251,15 @@
           status: 'REGISTRADO'
         };
 
-        if (supabase) {
-          const { error } = await supabase.from('incidencias').insert([newRecordSupabase]);
-          if (error) {
-            showToast("Error al guardar en la nube: " + error.message, "error");
-            setSubmitting(false);
-            return;
-          }
-          await fetchIncidentsFromSupabase();
-        } else {
-          setIncidents((prev) => [newRecordSupabase, ...prev]);
+        const { error } = await supabase.from('incidencias').insert([newRecordSupabase]);
+
+        if (error) {
+          showToast("❌ Error al guardar en la nube: " + error.message, "error");
+          setSubmitting(false);
+          return;
         }
 
-        setSuccessMsg('¡El reporte ha sido guardado exitosamente!');
+        setSuccessMsg('¡El reporte se ha guardado exitosamente en la nube!');
         setSubmitting(false);
         setCurrentStep(1);
 
@@ -295,45 +278,44 @@
           fotosVehiculo: null
         });
 
+        await fetchIncidentsFromSupabase();
+
         setTimeout(() => {
           setSuccessMsg('');
           setActiveTab('listado');
         }, 1800);
       };
 
-      // --- EDITAR EN SUPABASE ---
       const handleSaveEdit = async (e) => {
         e.preventDefault();
         if (!editingIncident) return;
         setSavingEdit(true);
 
-        if (supabase) {
-          const updatedDataSupabase = {
-            fecha: editingIncident.fecha,
-            hora_form: editingIncident.horaForm,
-            sucursal: editingIncident.sucursal,
-            hora_evento: editingIncident.horaEvento,
-            reporto: editingIncident.reporto,
-            evento: editingIncident.evento,
-            quien_reporta_text: editingIncident.quienReportaText,
-            monto_total: parseFloat(editingIncident.montoTotal) || 0,
-            foto_inventario: editingIncident.fotoInventario,
-            foto_sospechoso: editingIncident.fotoSospechoso,
-            evidencia_hechos: editingIncident.evidenciaHechos,
-            fotos_vehiculo: editingIncident.fotosVehiculo,
-            status: editingIncident.status || 'REGISTRADO'
-          };
+        const updatedDataSupabase = {
+          fecha: editingIncident.fecha,
+          hora_form: editingIncident.horaForm,
+          sucursal: editingIncident.sucursal,
+          hora_evento: editingIncident.horaEvento,
+          reporto: editingIncident.reporto,
+          evento: editingIncident.evento,
+          quien_reporta_text: editingIncident.quienReportaText,
+          monto_total: parseFloat(editingIncident.montoTotal) || 0,
+          foto_inventario: editingIncident.fotoInventario,
+          foto_sospechoso: editingIncident.fotoSospechoso,
+          evidencia_hechos: editingIncident.evidenciaHechos,
+          fotos_vehiculo: editingIncident.fotosVehiculo,
+          status: editingIncident.status || 'REGISTRADO'
+        };
 
-          const { error } = await supabase.from('incidencias').update(updatedDataSupabase).eq('id', editingIncident.id);
+        const { error } = await supabase.from('incidencias').update(updatedDataSupabase).eq('id', editingIncident.id);
 
-          if (error) {
-            showToast("Error al actualizar: " + error.message, "error");
-          } else {
-            showToast("Reporte actualizado.", "success");
-            await fetchIncidentsFromSupabase();
-            setEditingIncident(null);
-            setSelectedIncidentModal(null);
-          }
+        if (error) {
+          showToast("Error al actualizar: " + error.message, "error");
+        } else {
+          showToast("Reporte actualizado.", "success");
+          await fetchIncidentsFromSupabase();
+          setEditingIncident(null);
+          setSelectedIncidentModal(null);
         }
         setSavingEdit(false);
       };
@@ -342,14 +324,16 @@
         if (!isAdminLoggedIn) return;
         setConfirmModal({
           title: "Eliminar Registro",
-          message: "¿Está seguro de eliminar esta incidencia?",
+          message: "¿Está seguro de eliminar esta incidencia permanentemente?",
           onConfirm: async () => {
-            if (supabase) {
-              await supabase.from('incidencias').delete().eq('id', id);
+            const { error } = await supabase.from('incidencias').delete().eq('id', id);
+            if (error) {
+              showToast("Error al eliminar: " + error.message, "error");
+            } else {
+              setIncidents((prev) => prev.filter((i) => i.id !== id));
+              if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
+              showToast("Incidencia eliminada.", "info");
             }
-            setIncidents((prev) => prev.filter((i) => i.id !== id));
-            if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
-            showToast("Incidencia eliminada.", "info");
             setConfirmModal(null);
           }
         });
@@ -357,11 +341,13 @@
 
       const handleUpdateStatus = async (id, newStatus) => {
         if (!isAdminLoggedIn) return;
-        if (supabase) {
-          await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
+        const { error } = await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
+        if (error) {
+          showToast("Error al actualizar estado", "error");
+        } else {
+          setIncidents((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: newStatus } : inc));
+          showToast(`Estado actualizado`, "success");
         }
-        setIncidents((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: newStatus } : inc));
-        showToast(`Estado actualizado`, "success");
       };
 
       const filteredIncidents = incidents.filter((inc) => {
@@ -391,10 +377,10 @@
                     <h1 className="font-bold text-lg leading-tight tracking-wide">REPORTE DE INCIDENCIAS</h1>
                     <span className="flex items-center text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
                       <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span>
-                      Nube Supabase
+                      100% Supabase
                     </span>
                   </div>
-                  <p className="text-xs text-[#8ECAE6]">Formulario de Captura Compartido</p>
+                  <p className="text-xs text-[#8ECAE6]">Base de datos compartida</p>
                 </div>
               </div>
 
@@ -456,7 +442,7 @@
               </div>
             )}
 
-            {/* TAB 1: FORMULARIO MULTI-PASO */}
+            {/* TAB 1: FORMULARIO */}
             {activeTab === 'formulario' && (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-6 sm:p-10 max-w-2xl mx-auto">
@@ -660,7 +646,7 @@
                             className="inline-flex items-center px-8 py-2.5 bg-black hover:bg-slate-800 text-white font-semibold text-sm rounded-lg transition shadow hover:shadow-md disabled:opacity-50"
                           >
                             {submitting ? (
-                              <><IconRefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando...</>
+                              <><IconRefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando en Nube...</>
                             ) : (
                               <><IconArrowRight className="w-4 h-4 ml-2" /> Enviar Reporte</>
                             )}
@@ -673,7 +659,7 @@
               </div>
             )}
 
-            {/* TAB 2: LISTADO DE INCIDENCIAS */}
+            {/* TAB 2: HISTORIAL */}
             {activeTab === 'listado' && (
               <div className="space-y-4 animate-fade-in">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -698,10 +684,15 @@
                   </div>
                 </div>
 
-                {filteredIncidents.length === 0 ? (
+                {loadingData ? (
+                  <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
+                    <IconRefreshCw className="w-8 h-8 mx-auto text-[#209EBB] animate-spin mb-3" />
+                    <p className="text-sm font-semibold text-slate-600">Cargando reportes desde la nube...</p>
+                  </div>
+                ) : filteredIncidents.length === 0 ? (
                   <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
                     <IconAlertTriangle className="w-10 h-10 mx-auto text-amber-400 mb-2" />
-                    <h3 className="font-bold text-slate-700 text-lg">No hay incidencias registradas</h3>
+                    <h3 className="font-bold text-slate-700 text-lg">No hay incidencias registradas aún</h3>
                   </div>
                 ) : (
                   <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -733,6 +724,7 @@
                               </td>
                               <td className="p-3">
                                 <div className="font-medium text-slate-800">{inc.reporto}</div>
+                                <div className="text-[10px] text-slate-400">{inc.quienReportaText}</div>
                               </td>
                               <td className="p-3 font-bold text-slate-900">
                                 ${parseFloat(inc.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
@@ -758,12 +750,14 @@
                                 <button
                                   onClick={() => setSelectedIncidentModal(inc)}
                                   className="p-1.5 text-slate-600 hover:text-[#209EBB] bg-slate-100 rounded-md mr-1"
+                                  title="Ver Detalle"
                                 >
                                   <IconEye className="w-4 h-4" />
                                 </button>
                                 <button
                                   onClick={() => setEditingIncident({ ...inc })}
                                   className="p-1.5 text-amber-700 bg-amber-100 rounded-md mr-1"
+                                  title="Editar"
                                 >
                                   <IconEdit className="w-4 h-4" />
                                 </button>
@@ -771,6 +765,7 @@
                                   <button
                                     onClick={() => handleDeleteIncident(inc.id)}
                                     className="p-1.5 text-red-600 bg-red-50 rounded-md"
+                                    title="Eliminar"
                                   >
                                     <IconTrash2 className="w-4 h-4" />
                                   </button>
@@ -786,7 +781,7 @@
               </div>
             )}
 
-            {/* TAB 3: CONFIGURACIÓN DE CATÁLOGOS */}
+            {/* TAB 3: CONFIGURACIÓN CATÁLOGOS */}
             {activeTab === 'configuracion' && isAdminLoggedIn && (
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
                 <div className="border-b border-slate-100 pb-4">
@@ -868,7 +863,7 @@
               </div>
             )}
 
-            {/* LOGIN DE ADMINISTRADOR */}
+            {/* LOGIN DE ADMIN */}
             {activeTab === 'login' && !isAdminLoggedIn && (
               <div className="max-w-md mx-auto bg-white rounded-2xl shadow-md border border-slate-200 p-8 my-8 animate-fade-in">
                 <div className="text-center mb-6">
