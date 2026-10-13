@@ -38,7 +38,15 @@
     // --- CREDENCIALES DE SUPABASE ---
     const SUPABASE_URL = "https://waueklmhwysbeqmbbmve.supabase.co";
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhdWVrbG1od3lzYmVxbWJibXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5MTY0MzYsImV4cCI6MjEwNzQ5MjQzNn0.tRM1m_2Atx8bujtk7udNTF8oE6nbnXSHFtQJXmaqV3E";
-    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    
+    let supabase = null;
+    try {
+      if (window.supabase) {
+        supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      }
+    } catch(e) {
+      console.error("Error al inicializar Supabase:", e);
+    }
 
     // --- COMPONENTES DE ÍCONOS SVG ---
     const IconWrapper = ({ children, className = "w-4 h-4" }) => (
@@ -69,29 +77,9 @@
     const IconRefreshCw = (p) => <IconWrapper {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></IconWrapper>;
 
     const DEFAULT_CATALOGS = {
-      sucursales: [
-        'JESUS MARIA',
-        'CENTRO HISTORICO',
-        'NORTE - PLAZA',
-        'SUR - INDUSTRIAL',
-        'ORIENTE - GARZA',
-        'PONIENTE - CERRO'
-      ],
-      reportoList: [
-        'Gladys Alejandra Cuellar Gamez',
-        'Carlos Alberto Mendoza Cruz',
-        'María Elena Torres Delgado',
-        'José Luis Hernández Reyes',
-        'Ana Sofia Ramos Ramírez'
-      ],
-      eventosList: [
-        'SUSTRACCIÓN DE MERCANCÍA',
-        'HECHO DE TRÁNSITO TERRESTRE',
-        'DAÑO A INSTALACIONES',
-        'EXTORSION O FRAUDE',
-        'ACCIDENTE LABORAL',
-        'OTRO / INCIDENCIA GENERAL'
-      ]
+      sucursales: ['JESUS MARIA', 'CENTRO HISTORICO', 'NORTE - PLAZA', 'SUR - INDUSTRIAL', 'ORIENTE - GARZA', 'PONIENTE - CERRO'],
+      reportoList: ['Gladys Alejandra Cuellar Gamez', 'Carlos Alberto Mendoza Cruz', 'María Elena Torres Delgado', 'José Luis Hernández Reyes', 'Ana Sofia Ramos Ramírez'],
+      eventosList: ['SUSTRACCIÓN DE MERCANCÍA', 'HECHO DE TRÁNSITO TERRESTRE', 'DAÑO A INSTALACIONES', 'EXTORSION O FRAUDE', 'ACCIDENTE LABORAL', 'OTRO / INCIDENCIA GENERAL']
     };
 
     function App() {
@@ -108,7 +96,7 @@
 
       const [catalogs, setCatalogs] = useState(DEFAULT_CATALOGS);
       const [incidents, setIncidents] = useState([]);
-      const [loadingData, setLoadingData] = useState(true);
+      const [loadingData, setLoadingData] = useState(false);
       const [submitting, setSubmitting] = useState(false);
       const [savingEdit, setSavingEdit] = useState(false);
       const [successMsg, setSuccessMsg] = useState('');
@@ -117,7 +105,7 @@
       const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
       const [editingIncident, setEditingIncident] = useState(null);
 
-      // Catalogo Edit State
+      // Catalogo State
       const [newSucursal, setNewSucursal] = useState('');
       const [newReporto, setNewReporto] = useState('');
       const [newEvent, setNewEvent] = useState('');
@@ -126,10 +114,10 @@
       const [formData, setFormData] = useState({
         fecha: new Date().toISOString().split('T')[0],
         horaForm: new Date().toTimeString().slice(0, 5),
-        sucursal: '',
+        sucursal: DEFAULT_CATALOGS.sucursales[0],
         horaEvento: new Date().toTimeString().slice(0, 5),
-        reporto: '',
-        evento: '',
+        reporto: DEFAULT_CATALOGS.reportoList[0],
+        evento: DEFAULT_CATALOGS.eventosList[0],
         quienReportaText: '',
         montoTotal: '',
         fotoInventario: null,
@@ -143,46 +131,9 @@
       const [filterSucursal, setFilterSucursal] = useState('ALL');
       const [filterEvento, setFilterEvento] = useState('ALL');
 
-      // --- 1. CARGAR CATÁLOGOS DESDE SUPABASE ---
-      const fetchCatalogsFromSupabase = async () => {
-        try {
-          const { data, error } = await supabase
-            .from('catalogos')
-            .select('*')
-            .eq('id', 'main')
-            .single();
-
-          if (data) {
-            const fetched = {
-              sucursales: data.sucursales || DEFAULT_CATALOGS.sucursales,
-              reportoList: data.reporto_list || DEFAULT_CATALOGS.reportoList,
-              eventosList: data.eventos_list || DEFAULT_CATALOGS.eventosList
-            };
-            setCatalogs(fetched);
-            
-            // Asignar valores por defecto al formulario
-            setFormData((prev) => ({
-              ...prev,
-              sucursal: prev.sucursal || fetched.sucursales[0] || '',
-              reporto: prev.reporto || fetched.reportoList[0] || '',
-              evento: prev.evento || fetched.eventosList[0] || ''
-            }));
-          } else {
-            // Si la fila no existe en la nube, crearla con los valores por defecto
-            await supabase.from('catalogos').insert([{
-              id: 'main',
-              sucursales: DEFAULT_CATALOGS.sucursales,
-              reporto_list: DEFAULT_CATALOGS.reportoList,
-              eventos_list: DEFAULT_CATALOGS.eventosList
-            }]);
-          }
-        } catch (e) {
-          console.error("Error al cargar catálogos de Supabase:", e);
-        }
-      };
-
-      // --- 2. OBTENER INCIDENCIAS DESDE SUPABASE ---
+      // --- OBTENER INCIDENCIAS ---
       const fetchIncidentsFromSupabase = async () => {
+        if (!supabase) return;
         setLoadingData(true);
         try {
           const { data, error } = await supabase
@@ -190,10 +141,7 @@
             .select('*')
             .order('created_at', { ascending: false });
 
-          if (error) {
-            console.error("Error obteniendo incidencias de Supabase:", error);
-            showToast("Error al cargar datos desde la nube", "error");
-          } else if (data) {
+          if (data) {
             const mapped = data.map((i) => ({
               id: i.id,
               fecha: i.fecha,
@@ -213,14 +161,13 @@
             setIncidents(mapped);
           }
         } catch (e) {
-          console.error(e);
+          console.error("Error al cargar incidencias:", e);
         } finally {
           setLoadingData(false);
         }
       };
 
       useEffect(() => {
-        fetchCatalogsFromSupabase();
         fetchIncidentsFromSupabase();
       }, []);
 
@@ -234,18 +181,13 @@
         if (!file) return;
 
         if (file.size > 12 * 1024 * 1024) {
-          showToast("El archivo excede el tamaño máximo permitido de 12MB.", "error");
+          showToast("El archivo excede el tamaño máximo de 12MB.", "error");
           return;
         }
 
         const reader = new FileReader();
         reader.onloadend = () => {
-          const fileObj = {
-            name: file.name,
-            type: file.type,
-            data: reader.result
-          };
-
+          const fileObj = { name: file.name, type: file.type, data: reader.result };
           if (isEditing) {
             setEditingIncident((prev) => ({ ...prev, [fieldKey]: fileObj }));
           } else {
@@ -255,55 +197,28 @@
         reader.readAsDataURL(file);
       };
 
-      // --- GUARDAR CATÁLOGOS EN SUPABASE ---
-      const saveCatalogsToSupabase = async (updatedCatalogs) => {
-        const { error } = await supabase
-          .from('catalogos')
-          .upsert({
-            id: 'main',
-            sucursales: updatedCatalogs.sucursales,
-            reporto_list: updatedCatalogs.reportoList,
-            eventos_list: updatedCatalogs.eventosList
-          });
-
-        if (error) {
-          console.error("Error guardando catálogo en Supabase:", error);
-          showToast("Error al guardar catálogo en la nube", "error");
-        }
-      };
-
-      const handleAddCatalogItem = async (category, value, resetSetter, categoryLabel) => {
+      const handleAddCatalogItem = (category, value, resetSetter, categoryLabel) => {
         if (!value || !value.trim()) return;
         const trimmedVal = value.trim();
         const currentList = catalogs[category] || [];
         
         if (currentList.some((item) => item.toLowerCase() === trimmedVal.toLowerCase())) {
-          showToast(`La opción "${trimmedVal}" ya existe en ${categoryLabel || 'la lista'}.`, 'warning');
+          showToast(`La opción "${trimmedVal}" ya existe.`, 'warning');
           return;
         }
 
         const updated = { ...catalogs, [category]: [...currentList, trimmedVal] };
         setCatalogs(updated);
         resetSetter('');
-        await saveCatalogsToSupabase(updated);
-        showToast(`"${trimmedVal}" agregada con éxito a la nube.`, 'success');
+        showToast(`"${trimmedVal}" agregada.`, 'success');
       };
 
-      const handleDeleteCatalogItem = (category, itemToDelete, categoryLabel) => {
+      const handleDeleteCatalogItem = (category, itemToDelete) => {
         if (!isAdminLoggedIn) return;
-        
-        setConfirmModal({
-          title: `Eliminar de ${categoryLabel || 'Catálogo'}`,
-          message: `¿Está seguro de eliminar "${itemToDelete}" de la nube?`,
-          onConfirm: async () => {
-            const currentList = catalogs[category] || [];
-            const updated = { ...catalogs, [category]: currentList.filter((item) => item !== itemToDelete) };
-            setCatalogs(updated);
-            await saveCatalogsToSupabase(updated);
-            showToast(`Opción "${itemToDelete}" eliminada.`, 'info');
-            setConfirmModal(null);
-          }
-        });
+        const currentList = catalogs[category] || [];
+        const updated = { ...catalogs, [category]: currentList.filter((item) => item !== itemToDelete) };
+        setCatalogs(updated);
+        showToast(`Opción eliminada.`, 'info');
       };
 
       const handleAdminLogin = (e) => {
@@ -315,7 +230,7 @@
           showToast("Sesión de administrador iniciada", "success");
           setActiveTab('formulario');
         } else {
-          setLoginError('Usuario o contraseña incorrectos. (Demo: admin / admin123)');
+          setLoginError('Usuario o contraseña incorrectos.');
         }
       };
 
@@ -349,22 +264,22 @@
           status: 'REGISTRADO'
         };
 
-        const { error } = await supabase.from('incidencias').insert([newRecordSupabase]);
-
-        if (error) {
-          console.error("Error insertando en Supabase:", error);
-          showToast("Error al guardar en la nube: " + error.message, "error");
-          setSubmitting(false);
-          return;
+        if (supabase) {
+          const { error } = await supabase.from('incidencias').insert([newRecordSupabase]);
+          if (error) {
+            showToast("Error al guardar en la nube: " + error.message, "error");
+            setSubmitting(false);
+            return;
+          }
+          await fetchIncidentsFromSupabase();
+        } else {
+          setIncidents((prev) => [newRecordSupabase, ...prev]);
         }
 
-        await fetchIncidentsFromSupabase();
-
-        setSuccessMsg('¡El reporte ha sido guardado exitosamente en la nube!');
+        setSuccessMsg('¡El reporte ha sido guardado exitosamente!');
         setSubmitting(false);
         setCurrentStep(1);
 
-        // Reset Form
         setFormData({
           fecha: new Date().toISOString().split('T')[0],
           horaForm: new Date().toTimeString().slice(0, 5),
@@ -392,92 +307,61 @@
         if (!editingIncident) return;
         setSavingEdit(true);
 
-        const updatedDataSupabase = {
-          fecha: editingIncident.fecha,
-          hora_form: editingIncident.horaForm,
-          sucursal: editingIncident.sucursal,
-          hora_evento: editingIncident.horaEvento,
-          reporto: editingIncident.reporto,
-          evento: editingIncident.evento,
-          quien_reporta_text: editingIncident.quienReportaText,
-          monto_total: parseFloat(editingIncident.montoTotal) || 0,
-          foto_inventario: editingIncident.fotoInventario,
-          foto_sospechoso: editingIncident.fotoSospechoso,
-          evidencia_hechos: editingIncident.evidenciaHechos,
-          fotos_vehiculo: editingIncident.fotosVehiculo,
-          status: editingIncident.status || 'REGISTRADO'
-        };
+        if (supabase) {
+          const updatedDataSupabase = {
+            fecha: editingIncident.fecha,
+            hora_form: editingIncident.horaForm,
+            sucursal: editingIncident.sucursal,
+            hora_evento: editingIncident.horaEvento,
+            reporto: editingIncident.reporto,
+            evento: editingIncident.evento,
+            quien_reporta_text: editingIncident.quienReportaText,
+            monto_total: parseFloat(editingIncident.montoTotal) || 0,
+            foto_inventario: editingIncident.fotoInventario,
+            foto_sospechoso: editingIncident.fotoSospechoso,
+            evidencia_hechos: editingIncident.evidenciaHechos,
+            fotos_vehiculo: editingIncident.fotosVehiculo,
+            status: editingIncident.status || 'REGISTRADO'
+          };
 
-        const { error } = await supabase
-          .from('incidencias')
-          .update(updatedDataSupabase)
-          .eq('id', editingIncident.id);
+          const { error } = await supabase.from('incidencias').update(updatedDataSupabase).eq('id', editingIncident.id);
 
-        if (error) {
-          showToast("Error al actualizar reporte en la nube: " + error.message, "error");
-        } else {
-          showToast("Reporte actualizado exitosamente.", "success");
-          await fetchIncidentsFromSupabase();
-          setEditingIncident(null);
-          setSelectedIncidentModal(null);
+          if (error) {
+            showToast("Error al actualizar: " + error.message, "error");
+          } else {
+            showToast("Reporte actualizado.", "success");
+            await fetchIncidentsFromSupabase();
+            setEditingIncident(null);
+            setSelectedIncidentModal(null);
+          }
         }
         setSavingEdit(false);
       };
 
-      // --- ELIMINAR DE SUPABASE ---
       const handleDeleteIncident = (id) => {
         if (!isAdminLoggedIn) return;
-        
         setConfirmModal({
           title: "Eliminar Registro",
-          message: "¿Está seguro de eliminar esta incidencia permanentemente de la nube?",
+          message: "¿Está seguro de eliminar esta incidencia?",
           onConfirm: async () => {
-            const { error } = await supabase.from('incidencias').delete().eq('id', id);
-            if (error) {
-              showToast("Error al eliminar de la nube: " + error.message, "error");
-            } else {
-              setIncidents((prev) => prev.filter((i) => i.id !== id));
-              if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
-              showToast("Incidencia eliminada exitosamente.", "info");
+            if (supabase) {
+              await supabase.from('incidencias').delete().eq('id', id);
             }
+            setIncidents((prev) => prev.filter((i) => i.id !== id));
+            if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
+            showToast("Incidencia eliminada.", "info");
             setConfirmModal(null);
           }
         });
       };
 
-      // --- ACTUALIZAR ESTADO EN SUPABASE ---
       const handleUpdateStatus = async (id, newStatus) => {
         if (!isAdminLoggedIn) return;
-        const { error } = await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
-        if (error) {
-          showToast("Error al actualizar estado en la nube", "error");
-        } else {
-          setIncidents((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: newStatus } : inc));
-          showToast(`Estado actualizado a ${newStatus}`, "success");
+        if (supabase) {
+          await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
         }
-      };
-
-      const exportToExcel = () => {
-        if (incidents.length === 0) {
-          showToast("No hay registros disponibles para exportar.", "warning");
-          return;
-        }
-
-        const headers = ["ID", "Fecha", "Hora Registro", "Sucursal", "Hora Evento", "Reportó", "Evento", "Quien Reporta", "Monto Total", "Estado"];
-        const rows = incidents.map((inc) => [
-          inc.id, inc.fecha || '', inc.horaForm || '', `"${inc.sucursal || ''}"`, inc.horaEvento || '',
-          `"${inc.reporto || ''}"`, `"${inc.evento || ''}"`, `"${inc.quienReportaText || ''}"`,
-          inc.montoTotal || '0', inc.status || 'REGISTRADO'
-        ]);
-
-        const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `Reporte_Incidencias_${new Date().toISOString().slice(0, 10)}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        setIncidents((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: newStatus } : inc));
+        showToast(`Estado actualizado`, "success");
       };
 
       const filteredIncidents = incidents.filter((inc) => {
@@ -507,14 +391,13 @@
                     <h1 className="font-bold text-lg leading-tight tracking-wide">REPORTE DE INCIDENCIAS</h1>
                     <span className="flex items-center text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
                       <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span>
-                      100% Nube Sincronizada
+                      Nube Supabase
                     </span>
                   </div>
-                  <p className="text-xs text-[#8ECAE6]">Datos y Catálogos Compartidos • Supabase</p>
+                  <p className="text-xs text-[#8ECAE6]">Formulario de Captura Compartido</p>
                 </div>
               </div>
 
-              {/* NAVEGACIÓN */}
               <nav className="flex items-center space-x-1 sm:space-x-2 bg-[#011e2d] p-1.5 rounded-xl text-sm font-medium">
                 <button
                   onClick={() => setActiveTab('formulario')}
@@ -522,8 +405,7 @@
                     activeTab === 'formulario' ? 'bg-[#209EBB] text-white font-semibold shadow' : 'text-slate-300 hover:text-white hover:bg-white/10'
                   }`}
                 >
-                  <IconPlusCircle className="w-4 h-4 mr-1.5" />
-                  Nuevo Reporte
+                  <IconPlusCircle className="w-4 h-4 mr-1.5" /> Nuevo Reporte
                 </button>
 
                 <button
@@ -532,8 +414,7 @@
                     activeTab === 'listado' ? 'bg-[#209EBB] text-white font-semibold shadow' : 'text-slate-300 hover:text-white hover:bg-white/10'
                   }`}
                 >
-                  <IconClipboardList className="w-4 h-4 mr-1.5" />
-                  Historial ({incidents.length})
+                  <IconClipboardList className="w-4 h-4 mr-1.5" /> Historial ({incidents.length})
                 </button>
 
                 {isAdminLoggedIn && (
@@ -543,27 +424,24 @@
                       activeTab === 'configuracion' ? 'bg-[#FFB701] text-[#023047] font-bold shadow' : 'text-amber-300 hover:text-amber-100 hover:bg-white/10'
                     }`}
                   >
-                    <IconSettings className="w-4 h-4 mr-1.5" />
-                    Catálogos
+                    <IconSettings className="w-4 h-4 mr-1.5" /> Catálogos
                   </button>
                 )}
               </nav>
 
-              {/* SESIÓN DE USUARIO */}
               <div className="flex items-center space-x-2">
                 {isAdminLoggedIn ? (
                   <div className="flex items-center bg-[#FFB701]/20 border border-[#FFB701]/40 rounded-lg px-2.5 py-1 text-xs text-[#FFB701]">
                     <IconLock className="w-3.5 h-3.5 mr-1" />
-                    <span className="font-semibold mr-2">Modo Admin</span>
-                    <button onClick={handleAdminLogout} className="hover:text-red-300 transition underline ml-1">Salir</button>
+                    <span className="font-semibold mr-2">Admin</span>
+                    <button onClick={handleAdminLogout} className="hover:text-red-300 underline ml-1">Salir</button>
                   </div>
                 ) : (
                   <button
                     onClick={() => setActiveTab('login')}
                     className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg transition"
                   >
-                    <IconLogIn className="w-3.5 h-3.5 mr-1 text-[#8ECAE6]" />
-                    Acceso Admin
+                    <IconLogIn className="w-3.5 h-3.5 mr-1 text-[#8ECAE6]" /> Acceso Admin
                   </button>
                 )}
               </div>
@@ -604,34 +482,27 @@
                               required
                               value={formData.fecha}
                               onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                             />
                             <input
                               type="time"
                               required
                               value={formData.horaForm}
                               onChange={(e) => setFormData({ ...formData, horaForm: e.target.value })}
-                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                             />
                           </div>
                         </div>
 
                         <div>
-                          <div className="flex justify-between items-center mb-2">
-                            <label className="block text-sm font-semibold text-slate-800">
-                              Sucursal <span className="text-red-500">*</span>
-                            </label>
-                            {isAdminLoggedIn && (
-                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
-                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
-                              </button>
-                            )}
-                          </div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Sucursal <span className="text-red-500">*</span>
+                          </label>
                           <select
                             required
                             value={formData.sucursal}
                             onChange={(e) => setFormData({ ...formData, sucursal: e.target.value })}
-                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                           >
                             {catalogs.sucursales.map((suc, idx) => (
                               <option key={idx} value={suc}>{suc}</option>
@@ -648,26 +519,19 @@
                             required
                             value={formData.horaEvento}
                             onChange={(e) => setFormData({ ...formData, horaEvento: e.target.value })}
-                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                           />
                         </div>
 
                         <div>
-                          <div className="flex justify-between items-center mb-2">
-                            <label className="block text-sm font-semibold text-slate-800">
-                              Reportó: <span className="text-red-500">*</span>
-                            </label>
-                            {isAdminLoggedIn && (
-                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
-                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
-                              </button>
-                            )}
-                          </div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Reportó: <span className="text-red-500">*</span>
+                          </label>
                           <select
                             required
                             value={formData.reporto}
                             onChange={(e) => setFormData({ ...formData, reporto: e.target.value })}
-                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                           >
                             {catalogs.reportoList.map((rep, idx) => (
                               <option key={idx} value={rep}>{rep}</option>
@@ -690,21 +554,14 @@
                     {currentStep === 2 && (
                       <div className="space-y-6 animate-fade-in">
                         <div>
-                          <div className="flex justify-between items-center mb-2">
-                            <label className="block text-sm font-semibold text-slate-800">
-                              Evento: <span className="text-red-500">*</span>
-                            </label>
-                            {isAdminLoggedIn && (
-                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
-                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
-                              </button>
-                            )}
-                          </div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Evento: <span className="text-red-500">*</span>
+                          </label>
                           <select
                             required
                             value={formData.evento}
                             onChange={(e) => setFormData({ ...formData, evento: e.target.value })}
-                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                           >
                             {catalogs.eventosList.map((ev, idx) => (
                               <option key={idx} value={ev}>{ev}</option>
@@ -722,7 +579,7 @@
                             placeholder="Nombre completo o cargo de quien reporta"
                             value={formData.quienReportaText}
                             onChange={(e) => setFormData({ ...formData, quienReportaText: e.target.value })}
-                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                           />
                         </div>
 
@@ -761,7 +618,7 @@
                               placeholder="0.00"
                               value={formData.montoTotal}
                               onChange={(e) => setFormData({ ...formData, montoTotal: e.target.value })}
-                              className="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                              className="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm bg-slate-50/50"
                             />
                           </div>
                         </div>
@@ -803,7 +660,7 @@
                             className="inline-flex items-center px-8 py-2.5 bg-black hover:bg-slate-800 text-white font-semibold text-sm rounded-lg transition shadow hover:shadow-md disabled:opacity-50"
                           >
                             {submitting ? (
-                              <><IconRefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando en Nube...</>
+                              <><IconRefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando...</>
                             ) : (
                               <><IconArrowRight className="w-4 h-4 ml-2" /> Enviar Reporte</>
                             )}
@@ -833,54 +690,18 @@
 
                   <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                     <button
-                      onClick={() => { fetchCatalogsFromSupabase(); fetchIncidentsFromSupabase(); }}
-                      className="flex items-center px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg shadow-sm transition"
-                      title="Recargar desde la nube"
+                      onClick={fetchIncidentsFromSupabase}
+                      className="flex items-center px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition"
                     >
                       <IconRefreshCw className={`w-3.5 h-3.5 mr-1 ${loadingData ? 'animate-spin' : ''}`} /> Actualizar
-                    </button>
-
-                    <select
-                      value={filterSucursal}
-                      onChange={(e) => setFilterSucursal(e.target.value)}
-                      className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
-                    >
-                      <option value="ALL">Todas las Sucursales</option>
-                      {catalogs.sucursales.map((s, i) => (
-                        <option key={i} value={s}>{s}</option>
-                      ))}
-                    </select>
-
-                    <select
-                      value={filterEvento}
-                      onChange={(e) => setFilterEvento(e.target.value)}
-                      className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
-                    >
-                      <option value="ALL">Todos los Eventos</option>
-                      {catalogs.eventosList.map((ev, i) => (
-                        <option key={i} value={ev}>{ev}</option>
-                      ))}
-                    </select>
-
-                    <button
-                      onClick={exportToExcel}
-                      className="flex items-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-                    >
-                      <IconFileSpreadsheet className="w-4 h-4 mr-1.5" /> Exportar CSV
                     </button>
                   </div>
                 </div>
 
-                {loadingData ? (
-                  <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
-                    <IconRefreshCw className="w-8 h-8 mx-auto text-[#209EBB] animate-spin mb-3" />
-                    <p className="text-sm font-semibold text-slate-600">Sincronizando con la nube...</p>
-                  </div>
-                ) : filteredIncidents.length === 0 ? (
+                {filteredIncidents.length === 0 ? (
                   <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
                     <IconAlertTriangle className="w-10 h-10 mx-auto text-amber-400 mb-2" />
                     <h3 className="font-bold text-slate-700 text-lg">No hay incidencias registradas</h3>
-                    <p className="text-xs text-slate-500 mt-1">Intenta ajustando los filtros o realiza un nuevo reporte.</p>
                   </div>
                 ) : (
                   <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -893,7 +714,6 @@
                             <th className="p-3">Evento</th>
                             <th className="p-3">Reportó</th>
                             <th className="p-3">Monto</th>
-                            <th className="p-3">Archivos</th>
                             <th className="p-3">Estado</th>
                             <th className="p-3 text-right">Acciones</th>
                           </tr>
@@ -913,36 +733,23 @@
                               </td>
                               <td className="p-3">
                                 <div className="font-medium text-slate-800">{inc.reporto}</div>
-                                <div className="text-[10px] text-slate-400">{inc.quienReportaText}</div>
                               </td>
                               <td className="p-3 font-bold text-slate-900">
                                 ${parseFloat(inc.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="p-3">
-                                <div className="flex items-center space-x-1">
-                                  {inc.fotoInventario && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">Inv</span>}
-                                  {inc.fotoSospechoso && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded">Sosp</span>}
-                                  {inc.evidenciaHechos && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded">Evid</span>}
-                                  {inc.fotosVehiculo && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded">Veh</span>}
-                                </div>
                               </td>
                               <td className="p-3">
                                 {isAdminLoggedIn ? (
                                   <select
                                     value={inc.status || 'REGISTRADO'}
                                     onChange={(e) => handleUpdateStatus(inc.id, e.target.value)}
-                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 font-medium"
+                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50"
                                   >
                                     <option value="REGISTRADO">REGISTRADO</option>
                                     <option value="EN REVISIÓN">EN REVISIÓN</option>
                                     <option value="RESUELTO">RESUELTO</option>
                                   </select>
                                 ) : (
-                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                    inc.status === 'RESUELTO' ? 'bg-emerald-100 text-emerald-800' :
-                                    inc.status === 'EN REVISIÓN' ? 'bg-amber-100 text-amber-800' :
-                                    'bg-slate-100 text-slate-700'
-                                  }`}>
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
                                     {inc.status || 'REGISTRADO'}
                                   </span>
                                 )}
@@ -950,25 +757,20 @@
                               <td className="p-3 text-right whitespace-nowrap">
                                 <button
                                   onClick={() => setSelectedIncidentModal(inc)}
-                                  className="p-1.5 text-slate-600 hover:text-[#209EBB] bg-slate-100 hover:bg-slate-200 rounded-md mr-1 transition"
-                                  title="Ver Detalle"
+                                  className="p-1.5 text-slate-600 hover:text-[#209EBB] bg-slate-100 rounded-md mr-1"
                                 >
                                   <IconEye className="w-4 h-4" />
                                 </button>
-                                
                                 <button
                                   onClick={() => setEditingIncident({ ...inc })}
-                                  className="p-1.5 text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md mr-1 transition"
-                                  title="Editar Incidencia y Fotos"
+                                  className="p-1.5 text-amber-700 bg-amber-100 rounded-md mr-1"
                                 >
                                   <IconEdit className="w-4 h-4" />
                                 </button>
-
                                 {isAdminLoggedIn && (
                                   <button
                                     onClick={() => handleDeleteIncident(inc.id)}
-                                    className="p-1.5 text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded-md transition"
-                                    title="Eliminar Incidencia"
+                                    className="p-1.5 text-red-600 bg-red-50 rounded-md"
                                   >
                                     <IconTrash2 className="w-4 h-4" />
                                   </button>
@@ -989,9 +791,8 @@
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
                 <div className="border-b border-slate-100 pb-4">
                   <h2 className="text-xl font-bold text-[#023047] flex items-center">
-                    <IconSettings className="w-5 h-5 mr-2 text-[#FFB701]" /> Gestión de Listas y Catálogos en la Nube
+                    <IconSettings className="w-5 h-5 mr-2 text-[#FFB701]" /> Gestión de Listas y Catálogos
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Los cambios realizados aquí se guardarán en Supabase y se verán reflejados en todos los dispositivos.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1005,14 +806,14 @@
                         {catalogs.sucursales.map((suc, i) => (
                           <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
                             <span className="font-medium text-slate-700">{suc}</span>
-                            <button onClick={() => handleDeleteCatalogItem('sucursales', suc, 'Sucursales')} className="text-slate-400 hover:text-red-500 p-1">
+                            <button onClick={() => handleDeleteCatalogItem('sucursales', suc)} className="text-slate-400 hover:text-red-500 p-1">
                               <IconX className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('sucursales', newSucursal, setNewSucursal, 'Sucursales'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('sucursales', newSucursal, setNewSucursal); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
                       <input type="text" placeholder="Nueva Sucursal..." value={newSucursal} onChange={(e) => setNewSucursal(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
                       <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
                     </form>
@@ -1028,14 +829,14 @@
                         {catalogs.reportoList.map((rep, i) => (
                           <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
                             <span className="font-medium text-slate-700">{rep}</span>
-                            <button onClick={() => handleDeleteCatalogItem('reportoList', rep, 'Reportó')} className="text-slate-400 hover:text-red-500 p-1">
+                            <button onClick={() => handleDeleteCatalogItem('reportoList', rep)} className="text-slate-400 hover:text-red-500 p-1">
                               <IconX className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('reportoList', newReporto, setNewReporto, 'Reportó'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('reportoList', newReporto, setNewReporto); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
                       <input type="text" placeholder="Nuevo Nombre..." value={newReporto} onChange={(e) => setNewReporto(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
                       <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
                     </form>
@@ -1051,14 +852,14 @@
                         {catalogs.eventosList.map((ev, i) => (
                           <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
                             <span className="font-medium text-slate-700">{ev}</span>
-                            <button onClick={() => handleDeleteCatalogItem('eventosList', ev, 'Eventos')} className="text-slate-400 hover:text-red-500 p-1">
+                            <button onClick={() => handleDeleteCatalogItem('eventosList', ev)} className="text-slate-400 hover:text-red-500 p-1">
                               <IconX className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('eventosList', newEvent, setNewEvent, 'Eventos'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('eventosList', newEvent, setNewEvent); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
                       <input type="text" placeholder="Nuevo Evento..." value={newEvent} onChange={(e) => setNewEvent(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
                       <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
                     </form>
@@ -1075,7 +876,6 @@
                     <IconLock className="w-6 h-6" />
                   </div>
                   <h2 className="text-xl font-bold text-[#023047]">Iniciar Sesión Administrador</h2>
-                  <p className="text-xs text-slate-500 mt-1">Credenciales para modificar catálogos y cambiar estados.</p>
                 </div>
 
                 {loginError && (
@@ -1112,7 +912,6 @@
                   <button type="submit" className="w-full py-2.5 bg-[#023047] text-white text-sm font-semibold rounded-lg shadow">
                     Entrar como Administrador
                   </button>
-
                   <p className="text-center text-[11px] text-slate-400 pt-2">Credenciales Demo: <b>admin</b> / <b>admin123</b></p>
                 </form>
               </div>
@@ -1136,4 +935,240 @@
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs bg-slate-50 p-4 rounded-xl border border-slate-100">
                       <div>
                         <span className="text-slate-400 block font-medium">Sucursal:</span>
-                        <span className="
+                        <span className="font-bold text-slate-800 text-sm">{selectedIncidentModal.sucursal}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Evento:</span>
+                        <span className="font-bold text-[#209EBB] text-sm">{selectedIncidentModal.evento}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Monto Total:</span>
+                        <span className="font-black text-slate-900 text-sm">
+                          ${parseFloat(selectedIncidentModal.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Archivos de Evidencia</h4>
+                      <MediaPreviewCard title="Foto del inventario (sustracción)" media={selectedIncidentModal.fotoInventario} />
+                      <MediaPreviewCard title="Foto del sospechoso" media={selectedIncidentModal.fotoSospechoso} />
+                      <MediaPreviewCard title="Evidencia de los hechos" media={selectedIncidentModal.evidenciaHechos} />
+                      <MediaPreviewCard title="Fotos del vehículo (tránsito terrestre)" media={selectedIncidentModal.fotosVehiculo} />
+                    </div>
+                  </div>
+
+                  <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <button
+                      onClick={() => {
+                        setEditingIncident({ ...selectedIncidentModal });
+                        setSelectedIncidentModal(null);
+                      }}
+                      className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-lg shadow transition"
+                    >
+                      <IconEdit className="w-3.5 h-3.5 mr-1.5" /> Editar o Añadir Fotos
+                    </button>
+                    <button onClick={() => setSelectedIncidentModal(null)} className="px-5 py-2 bg-slate-800 text-white font-medium text-xs rounded-lg">
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL EDITAR INCIDENCIA */}
+            {editingIncident && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                    <div>
+                      <h3 className="font-bold text-lg text-[#023047] flex items-center">
+                        <IconEdit className="w-5 h-5 mr-2 text-amber-500" /> Editar Incidencia
+                      </h3>
+                    </div>
+                    <button onClick={() => setEditingIncident(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+                      <IconX className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveEdit} className="p-6 space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Monto Total ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={editingIncident.montoTotal || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, montoTotal: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50 font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h4 className="font-bold text-xs text-[#023047] uppercase tracking-wider">Adjuntar / Modificar Fotografías</h4>
+                      
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del inventario (sustracción):</label>
+                        <UploadBox
+                          id="edit_fotoInventario"
+                          fileData={editingIncident.fotoInventario}
+                          onChange={(e) => handleFileUpload(e, 'fotoInventario', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotoInventario: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del sospechoso:</label>
+                        <UploadBox
+                          id="edit_fotoSospechoso"
+                          fileData={editingIncident.fotoSospechoso}
+                          onChange={(e) => handleFileUpload(e, 'fotoSospechoso', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotoSospechoso: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Evidencia de los hechos:</label>
+                        <UploadBox
+                          id="edit_evidenciaHechos"
+                          fileData={editingIncident.evidenciaHechos}
+                          onChange={(e) => handleFileUpload(e, 'evidenciaHechos', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, evidenciaHechos: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Fotos del vehículo (tránsito terrestre):</label>
+                        <UploadBox
+                          id="edit_fotosVehiculo"
+                          fileData={editingIncident.fotosVehiculo}
+                          onChange={(e) => handleFileUpload(e, 'fotosVehiculo', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotosVehiculo: null })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditingIncident(null)}
+                        className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingEdit}
+                        className="px-6 py-2 bg-black hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow"
+                      >
+                        {savingEdit ? 'Guardando...' : 'Guardar Cambios'}
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* NOTIFICACIONES Y CONFIRMACIONES */}
+            {toast && (
+              <div className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl text-xs font-semibold flex items-center space-x-2 ${
+                toast.type === 'error' ? 'bg-red-900 text-white' :
+                toast.type === 'warning' ? 'bg-amber-500 text-white' :
+                toast.type === 'success' ? 'bg-emerald-600 text-white' :
+                'bg-slate-800 text-white'
+              }`}>
+                <span>{toast.message}</span>
+                <button onClick={() => setToast(null)} className="ml-2"><IconX className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
+
+            {confirmModal && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+                  <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+                    <IconAlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-800">{confirmModal.title}</h3>
+                    <p className="text-xs text-slate-500 mt-1">{confirmModal.message}</p>
+                  </div>
+                  <div className="flex items-center justify-center space-x-3 pt-2">
+                    <button onClick={() => setConfirmModal(null)} className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs">Cancelar</button>
+                    <button onClick={confirmModal.onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold shadow">Confirmar</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
+        </div>
+      );
+    }
+
+    function UploadBox({ id, fileData, onChange, onRemove }) {
+      return (
+        <div className="mt-1">
+          {fileData ? (
+            <div className="relative border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center space-x-3 overflow-hidden">
+                {fileData.type?.startsWith('image/') ? (
+                  <img src={fileData.data} alt="preview" className="w-12 h-12 object-cover rounded-lg border" />
+                ) : (
+                  <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center"><IconUploadCloud className="w-6 h-6 text-slate-500" /></div>
+                )}
+                <div className="truncate">
+                  <p className="text-xs font-semibold text-slate-700 truncate">{fileData.name}</p>
+                  <p className="text-[10px] text-emerald-600 font-medium">Cargado correctamente</p>
+                </div>
+              </div>
+              <button type="button" onClick={onRemove} className="p-1.5 text-slate-400 hover:text-red-500"><IconX className="w-4 h-4" /></button>
+            </div>
+          ) : (
+            <label htmlFor={id} className="border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50 transition">
+              <IconUploadCloud className="w-5 h-5 text-slate-400 mb-1" />
+              <p className="text-xs text-slate-600 font-medium text-center">
+                <span className="underline text-slate-700">Selecciona un archivo</span>
+              </p>
+              <input id={id} type="file" accept="image/*,video/*" onChange={onChange} className="hidden" />
+            </label>
+          )}
+        </div>
+      );
+    }
+
+    function MediaPreviewCard({ title, media }) {
+      if (!media) {
+        return (
+          <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-xs text-slate-400 flex items-center justify-between">
+            <span>{title}</span>
+            <span className="italic">No adjuntado</span>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700">{title}</span>
+            <a href={media.data} download={media.name || 'evidencia'} className="text-[#209EBB] hover:underline text-[11px] font-medium">Descargar</a>
+          </div>
+          <div className="rounded-lg overflow-hidden border border-slate-100 bg-slate-900 max-h-64 flex items-center justify-center">
+            {media.type?.startsWith('image/') ? (
+              <img src={media.data} alt={title} className="max-h-64 object-contain" />
+            ) : media.type?.startsWith('video/') ? (
+              <video src={media.data} controls className="max-h-64 w-full" />
+            ) : (
+              <div className="p-4 text-white text-xs">Vista previa no disponible</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+  </script>
+</body>
+</html>
