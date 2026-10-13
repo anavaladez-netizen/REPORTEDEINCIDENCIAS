@@ -40,7 +40,7 @@
     const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhdWVrbG1od3lzYmVxbWJibXZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE5MTY0MzYsImV4cCI6MjEwNzQ5MjQzNn0.tRM1m_2Atx8bujtk7udNTF8oE6nbnXSHFtQJXmaqV3E";
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // --- COMPONENTES DE ÍCONOS SVG AUTOCONTENIDOS ---
+    // --- COMPONENTES DE ÍCONOS SVG ---
     const IconWrapper = ({ children, className = "w-4 h-4" }) => (
       <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {children}
@@ -61,6 +61,7 @@
     const IconSearch = (p) => <IconWrapper {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></IconWrapper>;
     const IconFileSpreadsheet = (p) => <IconWrapper {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M12 13v8"/></IconWrapper>;
     const IconEye = (p) => <IconWrapper {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></IconWrapper>;
+    const IconEdit = (p) => <IconWrapper {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></IconWrapper>;
     const IconTrash2 = (p) => <IconWrapper {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconWrapper>;
     const IconMapPin = (p) => <IconWrapper {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></IconWrapper>;
     const IconUser = (p) => <IconWrapper {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></IconWrapper>;
@@ -117,9 +118,14 @@
       const [incidents, setIncidents] = useState([]);
       const [loadingData, setLoadingData] = useState(true);
       const [submitting, setSubmitting] = useState(false);
+      const [savingEdit, setSavingEdit] = useState(false);
       const [successMsg, setSuccessMsg] = useState('');
 
-      // Catalog Edit State
+      // Estado para Modales
+      const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
+      const [editingIncident, setEditingIncident] = useState(null);
+
+      // Catalogo Edit State
       const [newSucursal, setNewSucursal] = useState('');
       const [newReporto, setNewReporto] = useState('');
       const [newEvent, setNewEvent] = useState('');
@@ -140,11 +146,10 @@
         fotosVehiculo: null
       });
 
-      // Filter & Modal State
+      // Filter State
       const [searchTerm, setSearchTerm] = useState('');
       const [filterSucursal, setFilterSucursal] = useState('ALL');
       const [filterEvento, setFilterEvento] = useState('ALL');
-      const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
 
       // --- OBTENER INCIDENCIAS DESDE SUPABASE ---
       const fetchIncidentsFromSupabase = async () => {
@@ -199,7 +204,7 @@
         setTimeout(() => setToast(null), 3500);
       };
 
-      const handleFileUpload = (e, fieldKey) => {
+      const handleFileUpload = (e, fieldKey, isEditing = false) => {
         const file = e.target.files[0];
         if (!file) return;
 
@@ -210,14 +215,17 @@
 
         const reader = new FileReader();
         reader.onloadend = () => {
-          setFormData((prev) => ({
-            ...prev,
-            [fieldKey]: {
-              name: file.name,
-              type: file.type,
-              data: reader.result
-            }
-          }));
+          const fileObj = {
+            name: file.name,
+            type: file.type,
+            data: reader.result
+          };
+
+          if (isEditing) {
+            setEditingIncident((prev) => ({ ...prev, [fieldKey]: fileObj }));
+          } else {
+            setFormData((prev) => ({ ...prev, [fieldKey]: fileObj }));
+          }
         };
         reader.readAsDataURL(file);
       };
@@ -334,6 +342,44 @@
         }, 1800);
       };
 
+      // --- ACTUALIZAR / EDITAR EN SUPABASE ---
+      const handleSaveEdit = async (e) => {
+        e.preventDefault();
+        if (!editingIncident) return;
+        setSavingEdit(true);
+
+        const updatedDataSupabase = {
+          fecha: editingIncident.fecha,
+          hora_form: editingIncident.horaForm,
+          sucursal: editingIncident.sucursal,
+          hora_evento: editingIncident.horaEvento,
+          reporto: editingIncident.reporto,
+          evento: editingIncident.evento,
+          quien_reporta_text: editingIncident.quienReportaText,
+          monto_total: parseFloat(editingIncident.montoTotal) || 0,
+          foto_inventario: editingIncident.fotoInventario,
+          foto_sospechoso: editingIncident.fotoSospechoso,
+          evidencia_hechos: editingIncident.evidenciaHechos,
+          fotos_vehiculo: editingIncident.fotosVehiculo,
+          status: editingIncident.status || 'REGISTRADO'
+        };
+
+        const { error } = await supabase
+          .from('incidencias')
+          .update(updatedDataSupabase)
+          .eq('id', editingIncident.id);
+
+        if (error) {
+          showToast("Error al actualizar reporte en la nube: " + error.message, "error");
+        } else {
+          showToast("Reporte actualizado exitosamente.", "success");
+          await fetchIncidentsFromSupabase();
+          setEditingIncident(null);
+          setSelectedIncidentModal(null);
+        }
+        setSavingEdit(false);
+      };
+
       // --- ELIMINAR DE SUPABASE ---
       const handleDeleteIncident = (id) => {
         if (!isAdminLoggedIn) return;
@@ -355,7 +401,7 @@
         });
       };
 
-      // --- ACTUALIZAR ESTADO EN SUPABASE ---
+      // --- ACTUALIZAR ESTADO RÁPIDO ---
       const handleUpdateStatus = async (id, newStatus) => {
         if (!isAdminLoggedIn) return;
         const { error } = await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
@@ -865,6 +911,15 @@
                                 >
                                   <IconEye className="w-4 h-4" />
                                 </button>
+                                
+                                <button
+                                  onClick={() => setEditingIncident({ ...inc })}
+                                  className="p-1.5 text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md mr-1 transition"
+                                  title="Editar Incidencia y Fotos"
+                                >
+                                  <IconEdit className="w-4 h-4" />
+                                </button>
+
                                 {isAdminLoggedIn && (
                                   <button
                                     onClick={() => handleDeleteIncident(inc.id)}
@@ -1076,11 +1131,190 @@
                     </div>
                   </div>
 
-                  <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                  <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <button
+                      onClick={() => {
+                        setEditingIncident({ ...selectedIncidentModal });
+                        setSelectedIncidentModal(null);
+                      }}
+                      className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-lg shadow transition"
+                    >
+                      <IconEdit className="w-3.5 h-3.5 mr-1.5" /> Editar o Añadir Fotos
+                    </button>
                     <button onClick={() => setSelectedIncidentModal(null)} className="px-5 py-2 bg-slate-800 text-white font-medium text-xs rounded-lg">
                       Cerrar
                     </button>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* MODAL EDITAR INCIDENCIA */}
+            {editingIncident && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                    <div>
+                      <h3 className="font-bold text-lg text-[#023047] flex items-center">
+                        <IconEdit className="w-5 h-5 mr-2 text-amber-500" /> Editar Incidencia ({editingIncident.id})
+                      </h3>
+                      <p className="text-xs text-slate-400">Modifica los datos o adjunta/reemplaza fotos faltantes</p>
+                    </div>
+                    <button onClick={() => setEditingIncident(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+                      <IconX className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <form onSubmit={handleSaveEdit} className="p-6 space-y-5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Fecha</label>
+                        <input
+                          type="date"
+                          required
+                          value={editingIncident.fecha || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, fecha: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Hora Evento</label>
+                        <input
+                          type="time"
+                          required
+                          value={editingIncident.horaEvento || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, horaEvento: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Sucursal</label>
+                        <select
+                          value={editingIncident.sucursal || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, sucursal: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                        >
+                          {catalogs.sucursales.map((s, idx) => (
+                            <option key={idx} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Evento</label>
+                        <select
+                          value={editingIncident.evento || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, evento: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                        >
+                          {catalogs.eventosList.map((ev, idx) => (
+                            <option key={idx} value={ev}>{ev}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Reportó</label>
+                        <select
+                          value={editingIncident.reporto || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, reporto: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                        >
+                          {catalogs.reportoList.map((rep, idx) => (
+                            <option key={idx} value={rep}>{rep}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Monto Total ($)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          required
+                          value={editingIncident.montoTotal || ''}
+                          onChange={(e) => setEditingIncident({ ...editingIncident, montoTotal: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50 font-bold"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Quien reporta (Detalle)</label>
+                      <input
+                        type="text"
+                        required
+                        value={editingIncident.quienReportaText || ''}
+                        onChange={(e) => setEditingIncident({ ...editingIncident, quienReportaText: e.target.value })}
+                        className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
+                      />
+                    </div>
+
+                    <hr className="border-slate-100 my-4" />
+
+                    <div className="space-y-4">
+                      <h4 className="font-bold text-xs text-[#023047] uppercase tracking-wider">Adjuntar / Modificar Fotografías</h4>
+                      
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del inventario (sustracción):</label>
+                        <UploadBox
+                          id="edit_fotoInventario"
+                          fileData={editingIncident.fotoInventario}
+                          onChange={(e) => handleFileUpload(e, 'fotoInventario', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotoInventario: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del sospechoso:</label>
+                        <UploadBox
+                          id="edit_fotoSospechoso"
+                          fileData={editingIncident.fotoSospechoso}
+                          onChange={(e) => handleFileUpload(e, 'fotoSospechoso', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotoSospechoso: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Evidencia de los hechos:</label>
+                        <UploadBox
+                          id="edit_evidenciaHechos"
+                          fileData={editingIncident.evidenciaHechos}
+                          onChange={(e) => handleFileUpload(e, 'evidenciaHechos', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, evidenciaHechos: null })}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Fotos del vehículo (tránsito terrestre):</label>
+                        <UploadBox
+                          id="edit_fotosVehiculo"
+                          fileData={editingIncident.fotosVehiculo}
+                          onChange={(e) => handleFileUpload(e, 'fotosVehiculo', true)}
+                          onRemove={() => setEditingIncident({ ...editingIncident, fotosVehiculo: null })}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
+                      <button
+                        type="button"
+                        onClick={() => setEditingIncident(null)}
+                        className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs hover:bg-slate-100"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={savingEdit}
+                        className="px-6 py-2 bg-black hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow transition disabled:opacity-50"
+                      >
+                        {savingEdit ? 'Guardando Cambios...' : 'Guardar Cambios en la Nube'}
+                      </button>
+                    </div>
+                  </form>
                 </div>
               </div>
             )}
@@ -1139,12 +1373,12 @@
               <button type="button" onClick={onRemove} className="p-1.5 text-slate-400 hover:text-red-500"><IconX className="w-4 h-4" /></button>
             </div>
           ) : (
-            <label htmlFor={id} className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50 transition">
-              <IconUploadCloud className="w-6 h-6 text-slate-400 mb-2" />
+            <label htmlFor={id} className="border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50 transition">
+              <IconUploadCloud className="w-5 h-5 text-slate-400 mb-1" />
               <p className="text-xs text-slate-600 font-medium text-center">
                 <span className="underline text-slate-700">Selecciona un archivo</span> o arrástralo aquí
               </p>
-              <p className="text-[10px] text-slate-400 mt-1">Máximo 12 MB (Imágenes o Videos)</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Máximo 12 MB (Imágenes o Videos)</p>
               <input id={id} type="file" accept="image/*,video/*" onChange={onChange} className="hidden" />
             </label>
           )}
