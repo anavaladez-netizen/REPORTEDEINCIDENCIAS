@@ -12,7 +12,7 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   
-  <!-- Babel Standalone para transpilar JSX -->
+  <!-- Babel Standalone -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Supabase JS Client -->
@@ -106,22 +106,14 @@
       const [activeTab, setActiveTab] = useState('formulario');
       const [currentStep, setCurrentStep] = useState(1);
 
-      const [catalogs, setCatalogs] = useState(() => {
-        try {
-          const saved = localStorage.getItem('tally_catalogs');
-          return saved ? JSON.parse(saved) : DEFAULT_CATALOGS;
-        } catch(e) {
-          return DEFAULT_CATALOGS;
-        }
-      });
-
+      const [catalogs, setCatalogs] = useState(DEFAULT_CATALOGS);
       const [incidents, setIncidents] = useState([]);
       const [loadingData, setLoadingData] = useState(true);
       const [submitting, setSubmitting] = useState(false);
       const [savingEdit, setSavingEdit] = useState(false);
       const [successMsg, setSuccessMsg] = useState('');
 
-      // Estado para Modales
+      // Modales
       const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
       const [editingIncident, setEditingIncident] = useState(null);
 
@@ -134,10 +126,10 @@
       const [formData, setFormData] = useState({
         fecha: new Date().toISOString().split('T')[0],
         horaForm: new Date().toTimeString().slice(0, 5),
-        sucursal: catalogs.sucursales[0] || '',
+        sucursal: '',
         horaEvento: new Date().toTimeString().slice(0, 5),
-        reporto: catalogs.reportoList[0] || '',
-        evento: catalogs.eventosList[0] || '',
+        reporto: '',
+        evento: '',
         quienReportaText: '',
         montoTotal: '',
         fotoInventario: null,
@@ -151,7 +143,45 @@
       const [filterSucursal, setFilterSucursal] = useState('ALL');
       const [filterEvento, setFilterEvento] = useState('ALL');
 
-      // --- OBTENER INCIDENCIAS DESDE SUPABASE ---
+      // --- 1. CARGAR CATÁLOGOS DESDE SUPABASE ---
+      const fetchCatalogsFromSupabase = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('catalogos')
+            .select('*')
+            .eq('id', 'main')
+            .single();
+
+          if (data) {
+            const fetched = {
+              sucursales: data.sucursales || DEFAULT_CATALOGS.sucursales,
+              reportoList: data.reporto_list || DEFAULT_CATALOGS.reportoList,
+              eventosList: data.eventos_list || DEFAULT_CATALOGS.eventosList
+            };
+            setCatalogs(fetched);
+            
+            // Asignar valores por defecto al formulario
+            setFormData((prev) => ({
+              ...prev,
+              sucursal: prev.sucursal || fetched.sucursales[0] || '',
+              reporto: prev.reporto || fetched.reportoList[0] || '',
+              evento: prev.evento || fetched.eventosList[0] || ''
+            }));
+          } else {
+            // Si la fila no existe en la nube, crearla con los valores por defecto
+            await supabase.from('catalogos').insert([{
+              id: 'main',
+              sucursales: DEFAULT_CATALOGS.sucursales,
+              reporto_list: DEFAULT_CATALOGS.reportoList,
+              eventos_list: DEFAULT_CATALOGS.eventosList
+            }]);
+          }
+        } catch (e) {
+          console.error("Error al cargar catálogos de Supabase:", e);
+        }
+      };
+
+      // --- 2. OBTENER INCIDENCIAS DESDE SUPABASE ---
       const fetchIncidentsFromSupabase = async () => {
         setLoadingData(true);
         try {
@@ -161,7 +191,7 @@
             .order('created_at', { ascending: false });
 
           if (error) {
-            console.error("Error obteniendo datos de Supabase:", error);
+            console.error("Error obteniendo incidencias de Supabase:", error);
             showToast("Error al cargar datos desde la nube", "error");
           } else if (data) {
             const mapped = data.map((i) => ({
@@ -190,14 +220,9 @@
       };
 
       useEffect(() => {
+        fetchCatalogsFromSupabase();
         fetchIncidentsFromSupabase();
       }, []);
-
-      useEffect(() => {
-        try {
-          localStorage.setItem('tally_catalogs', JSON.stringify(catalogs));
-        } catch(e) { console.error(e); }
-      }, [catalogs]);
 
       const showToast = (message, type = 'info') => {
         setToast({ message, type });
@@ -230,7 +255,24 @@
         reader.readAsDataURL(file);
       };
 
-      const handleAddCatalogItem = (category, value, resetSetter, categoryLabel) => {
+      // --- GUARDAR CATÁLOGOS EN SUPABASE ---
+      const saveCatalogsToSupabase = async (updatedCatalogs) => {
+        const { error } = await supabase
+          .from('catalogos')
+          .upsert({
+            id: 'main',
+            sucursales: updatedCatalogs.sucursales,
+            reporto_list: updatedCatalogs.reportoList,
+            eventos_list: updatedCatalogs.eventosList
+          });
+
+        if (error) {
+          console.error("Error guardando catálogo en Supabase:", error);
+          showToast("Error al guardar catálogo en la nube", "error");
+        }
+      };
+
+      const handleAddCatalogItem = async (category, value, resetSetter, categoryLabel) => {
         if (!value || !value.trim()) return;
         const trimmedVal = value.trim();
         const currentList = catalogs[category] || [];
@@ -243,7 +285,8 @@
         const updated = { ...catalogs, [category]: [...currentList, trimmedVal] };
         setCatalogs(updated);
         resetSetter('');
-        showToast(`"${trimmedVal}" agregada con éxito.`, 'success');
+        await saveCatalogsToSupabase(updated);
+        showToast(`"${trimmedVal}" agregada con éxito a la nube.`, 'success');
       };
 
       const handleDeleteCatalogItem = (category, itemToDelete, categoryLabel) => {
@@ -251,11 +294,12 @@
         
         setConfirmModal({
           title: `Eliminar de ${categoryLabel || 'Catálogo'}`,
-          message: `¿Está seguro de eliminar la opción "${itemToDelete}"?`,
-          onConfirm: () => {
+          message: `¿Está seguro de eliminar "${itemToDelete}" de la nube?`,
+          onConfirm: async () => {
             const currentList = catalogs[category] || [];
             const updated = { ...catalogs, [category]: currentList.filter((item) => item !== itemToDelete) };
             setCatalogs(updated);
+            await saveCatalogsToSupabase(updated);
             showToast(`Opción "${itemToDelete}" eliminada.`, 'info');
             setConfirmModal(null);
           }
@@ -342,7 +386,7 @@
         }, 1800);
       };
 
-      // --- ACTUALIZAR / EDITAR EN SUPABASE ---
+      // --- EDITAR EN SUPABASE ---
       const handleSaveEdit = async (e) => {
         e.preventDefault();
         if (!editingIncident) return;
@@ -401,7 +445,7 @@
         });
       };
 
-      // --- ACTUALIZAR ESTADO RÁPIDO ---
+      // --- ACTUALIZAR ESTADO EN SUPABASE ---
       const handleUpdateStatus = async (id, newStatus) => {
         if (!isAdminLoggedIn) return;
         const { error } = await supabase.from('incidencias').update({ status: newStatus }).eq('id', id);
@@ -463,10 +507,10 @@
                     <h1 className="font-bold text-lg leading-tight tracking-wide">REPORTE DE INCIDENCIAS</h1>
                     <span className="flex items-center text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
                       <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span>
-                      Conectado a Nube
+                      100% Nube Sincronizada
                     </span>
                   </div>
-                  <p className="text-xs text-[#8ECAE6]">Base de datos compartida • Supabase</p>
+                  <p className="text-xs text-[#8ECAE6]">Datos y Catálogos Compartidos • Supabase</p>
                 </div>
               </div>
 
@@ -772,7 +816,7 @@
               </div>
             )}
 
-            {/* TAB 2: LISTADO DE INCIDENCIAS DE SUPABASE */}
+            {/* TAB 2: LISTADO DE INCIDENCIAS */}
             {activeTab === 'listado' && (
               <div className="space-y-4 animate-fade-in">
                 <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
@@ -789,7 +833,7 @@
 
                   <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
                     <button
-                      onClick={fetchIncidentsFromSupabase}
+                      onClick={() => { fetchCatalogsFromSupabase(); fetchIncidentsFromSupabase(); }}
                       className="flex items-center px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg shadow-sm transition"
                       title="Recargar desde la nube"
                     >
@@ -830,7 +874,7 @@
                 {loadingData ? (
                   <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
                     <IconRefreshCw className="w-8 h-8 mx-auto text-[#209EBB] animate-spin mb-3" />
-                    <p className="text-sm font-semibold text-slate-600">Conectando con Supabase y descargando registros...</p>
+                    <p className="text-sm font-semibold text-slate-600">Sincronizando con la nube...</p>
                   </div>
                 ) : filteredIncidents.length === 0 ? (
                   <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
@@ -945,9 +989,9 @@
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
                 <div className="border-b border-slate-100 pb-4">
                   <h2 className="text-xl font-bold text-[#023047] flex items-center">
-                    <IconSettings className="w-5 h-5 mr-2 text-[#FFB701]" /> Gestión de Listas y Catálogos
+                    <IconSettings className="w-5 h-5 mr-2 text-[#FFB701]" /> Gestión de Listas y Catálogos en la Nube
                   </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Agrega o elimina elementos de las listas del formulario.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Los cambios realizados aquí se guardarán en Supabase y se verán reflejados en todos los dispositivos.</p>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1092,332 +1136,4 @@
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs bg-slate-50 p-4 rounded-xl border border-slate-100">
                       <div>
                         <span className="text-slate-400 block font-medium">Sucursal:</span>
-                        <span className="font-bold text-slate-800 text-sm">{selectedIncidentModal.sucursal}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Evento:</span>
-                        <span className="font-bold text-[#209EBB] text-sm">{selectedIncidentModal.evento}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Monto Total:</span>
-                        <span className="font-black text-slate-900 text-sm">
-                          ${parseFloat(selectedIncidentModal.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Fecha:</span>
-                        <span className="font-semibold text-slate-700">{selectedIncidentModal.fecha}</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Hora Evento:</span>
-                        <span className="font-semibold text-slate-700">{selectedIncidentModal.horaEvento} hs</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block font-medium">Reportó:</span>
-                        <span className="font-semibold text-slate-700">{selectedIncidentModal.reporto}</span>
-                      </div>
-                      <div className="col-span-2 sm:col-span-3">
-                        <span className="text-slate-400 block font-medium">Quién Reporta (Detalle):</span>
-                        <span className="font-semibold text-slate-800">{selectedIncidentModal.quienReportaText}</span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Archivos de Evidencia</h4>
-                      <MediaPreviewCard title="Foto del inventario (sustracción)" media={selectedIncidentModal.fotoInventario} />
-                      <MediaPreviewCard title="Foto del sospechoso" media={selectedIncidentModal.fotoSospechoso} />
-                      <MediaPreviewCard title="Evidencia de los hechos" media={selectedIncidentModal.evidenciaHechos} />
-                      <MediaPreviewCard title="Fotos del vehículo (tránsito terrestre)" media={selectedIncidentModal.fotosVehiculo} />
-                    </div>
-                  </div>
-
-                  <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <button
-                      onClick={() => {
-                        setEditingIncident({ ...selectedIncidentModal });
-                        setSelectedIncidentModal(null);
-                      }}
-                      className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-lg shadow transition"
-                    >
-                      <IconEdit className="w-3.5 h-3.5 mr-1.5" /> Editar o Añadir Fotos
-                    </button>
-                    <button onClick={() => setSelectedIncidentModal(null)} className="px-5 py-2 bg-slate-800 text-white font-medium text-xs rounded-lg">
-                      Cerrar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* MODAL EDITAR INCIDENCIA */}
-            {editingIncident && (
-              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
-                  <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-                    <div>
-                      <h3 className="font-bold text-lg text-[#023047] flex items-center">
-                        <IconEdit className="w-5 h-5 mr-2 text-amber-500" /> Editar Incidencia ({editingIncident.id})
-                      </h3>
-                      <p className="text-xs text-slate-400">Modifica los datos o adjunta/reemplaza fotos faltantes</p>
-                    </div>
-                    <button onClick={() => setEditingIncident(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
-                      <IconX className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  <form onSubmit={handleSaveEdit} className="p-6 space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Fecha</label>
-                        <input
-                          type="date"
-                          required
-                          value={editingIncident.fecha || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, fecha: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Hora Evento</label>
-                        <input
-                          type="time"
-                          required
-                          value={editingIncident.horaEvento || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, horaEvento: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Sucursal</label>
-                        <select
-                          value={editingIncident.sucursal || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, sucursal: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                        >
-                          {catalogs.sucursales.map((s, idx) => (
-                            <option key={idx} value={s}>{s}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Evento</label>
-                        <select
-                          value={editingIncident.evento || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, evento: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                        >
-                          {catalogs.eventosList.map((ev, idx) => (
-                            <option key={idx} value={ev}>{ev}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Reportó</label>
-                        <select
-                          value={editingIncident.reporto || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, reporto: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                        >
-                          {catalogs.reportoList.map((rep, idx) => (
-                            <option key={idx} value={rep}>{rep}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Monto Total ($)</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          value={editingIncident.montoTotal || ''}
-                          onChange={(e) => setEditingIncident({ ...editingIncident, montoTotal: e.target.value })}
-                          className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50 font-bold"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 mb-1">Quien reporta (Detalle)</label>
-                      <input
-                        type="text"
-                        required
-                        value={editingIncident.quienReportaText || ''}
-                        onChange={(e) => setEditingIncident({ ...editingIncident, quienReportaText: e.target.value })}
-                        className="w-full px-3 py-2 text-xs border rounded-lg bg-slate-50"
-                      />
-                    </div>
-
-                    <hr className="border-slate-100 my-4" />
-
-                    <div className="space-y-4">
-                      <h4 className="font-bold text-xs text-[#023047] uppercase tracking-wider">Adjuntar / Modificar Fotografías</h4>
-                      
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del inventario (sustracción):</label>
-                        <UploadBox
-                          id="edit_fotoInventario"
-                          fileData={editingIncident.fotoInventario}
-                          onChange={(e) => handleFileUpload(e, 'fotoInventario', true)}
-                          onRemove={() => setEditingIncident({ ...editingIncident, fotoInventario: null })}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Foto del sospechoso:</label>
-                        <UploadBox
-                          id="edit_fotoSospechoso"
-                          fileData={editingIncident.fotoSospechoso}
-                          onChange={(e) => handleFileUpload(e, 'fotoSospechoso', true)}
-                          onRemove={() => setEditingIncident({ ...editingIncident, fotoSospechoso: null })}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Evidencia de los hechos:</label>
-                        <UploadBox
-                          id="edit_evidenciaHechos"
-                          fileData={editingIncident.evidenciaHechos}
-                          onChange={(e) => handleFileUpload(e, 'evidenciaHechos', true)}
-                          onRemove={() => setEditingIncident({ ...editingIncident, evidenciaHechos: null })}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1">Fotos del vehículo (tránsito terrestre):</label>
-                        <UploadBox
-                          id="edit_fotosVehiculo"
-                          fileData={editingIncident.fotosVehiculo}
-                          onChange={(e) => handleFileUpload(e, 'fotosVehiculo', true)}
-                          onRemove={() => setEditingIncident({ ...editingIncident, fotosVehiculo: null })}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="pt-4 border-t border-slate-100 flex items-center justify-end space-x-3">
-                      <button
-                        type="button"
-                        onClick={() => setEditingIncident(null)}
-                        className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs hover:bg-slate-100"
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={savingEdit}
-                        className="px-6 py-2 bg-black hover:bg-slate-800 text-white text-xs font-semibold rounded-lg shadow transition disabled:opacity-50"
-                      >
-                        {savingEdit ? 'Guardando Cambios...' : 'Guardar Cambios en la Nube'}
-                      </button>
-                    </div>
-                  </form>
-                </div>
-              </div>
-            )}
-
-            {/* NOTIFICACIONES Y CONFIRMACIONES */}
-            {toast && (
-              <div className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl text-xs font-semibold flex items-center space-x-2 ${
-                toast.type === 'error' ? 'bg-red-900 text-white' :
-                toast.type === 'warning' ? 'bg-amber-500 text-white' :
-                toast.type === 'success' ? 'bg-emerald-600 text-white' :
-                'bg-slate-800 text-white'
-              }`}>
-                <span>{toast.message}</span>
-                <button onClick={() => setToast(null)} className="ml-2"><IconX className="w-3.5 h-3.5" /></button>
-              </div>
-            )}
-
-            {confirmModal && (
-              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-                <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
-                  <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
-                    <IconAlertTriangle className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-base text-slate-800">{confirmModal.title}</h3>
-                    <p className="text-xs text-slate-500 mt-1">{confirmModal.message}</p>
-                  </div>
-                  <div className="flex items-center justify-center space-x-3 pt-2">
-                    <button onClick={() => setConfirmModal(null)} className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs">Cancelar</button>
-                    <button onClick={confirmModal.onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold shadow">Confirmar</button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </main>
-        </div>
-      );
-    }
-
-    function UploadBox({ id, fileData, onChange, onRemove }) {
-      return (
-        <div className="mt-1">
-          {fileData ? (
-            <div className="relative border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between">
-              <div className="flex items-center space-x-3 overflow-hidden">
-                {fileData.type?.startsWith('image/') ? (
-                  <img src={fileData.data} alt="preview" className="w-12 h-12 object-cover rounded-lg border" />
-                ) : (
-                  <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center"><IconUploadCloud className="w-6 h-6 text-slate-500" /></div>
-                )}
-                <div className="truncate">
-                  <p className="text-xs font-semibold text-slate-700 truncate">{fileData.name}</p>
-                  <p className="text-[10px] text-emerald-600 font-medium">Cargado correctamente</p>
-                </div>
-              </div>
-              <button type="button" onClick={onRemove} className="p-1.5 text-slate-400 hover:text-red-500"><IconX className="w-4 h-4" /></button>
-            </div>
-          ) : (
-            <label htmlFor={id} className="border-2 border-dashed border-slate-300 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50 transition">
-              <IconUploadCloud className="w-5 h-5 text-slate-400 mb-1" />
-              <p className="text-xs text-slate-600 font-medium text-center">
-                <span className="underline text-slate-700">Selecciona un archivo</span> o arrástralo aquí
-              </p>
-              <p className="text-[10px] text-slate-400 mt-0.5">Máximo 12 MB (Imágenes o Videos)</p>
-              <input id={id} type="file" accept="image/*,video/*" onChange={onChange} className="hidden" />
-            </label>
-          )}
-        </div>
-      );
-    }
-
-    function MediaPreviewCard({ title, media }) {
-      if (!media) {
-        return (
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-xs text-slate-400 flex items-center justify-between">
-            <span>{title}</span>
-            <span className="italic">No adjuntado</span>
-          </div>
-        );
-      }
-
-      return (
-        <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">{title}</span>
-            <a href={media.data} download={media.name || 'evidencia'} className="text-[#209EBB] hover:underline text-[11px] font-medium">Descargar</a>
-          </div>
-          <div className="rounded-lg overflow-hidden border border-slate-100 bg-slate-900 max-h-64 flex items-center justify-center">
-            {media.type?.startsWith('image/') ? (
-              <img src={media.data} alt={title} className="max-h-64 object-contain" />
-            ) : media.type?.startsWith('video/') ? (
-              <video src={media.data} controls className="max-h-64 w-full" />
-            ) : (
-              <div className="p-4 text-white text-xs">Vista previa no disponible</div>
-            )}
-          </div>
-        </div>
-      );
-    }
-
-    const rootElement = document.getElementById('root');
-    const root = ReactDOM.createRoot(rootElement);
-    root.render(<App />);
-  </script>
-</body>
-</html>
+                        <span className="
