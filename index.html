@@ -1,326 +1,132 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import {
-  getFirestore,
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  onSnapshot
-} from 'firebase/firestore';
-import {
-  getAuth,
-  signInAnonymously,
-  signInWithCustomToken,
-  onAuthStateChanged
-} from 'firebase/auth';
-import {
-  ClipboardList,
-  PlusCircle,
-  LogIn,
-  LogOut,
-  Download,
-  Edit,
-  Trash2,
-  Eye,
-  CheckCircle,
-  Clock,
-  AlertTriangle,
-  UploadCloud,
-  Image as ImageIcon,
-  Video,
-  X,
-  Search,
-  Lock,
-  FileSpreadsheet,
-  MapPin,
-  Calendar,
-  User,
-  ArrowRight,
-  ArrowLeft,
-  Settings,
-  Plus,
-  RefreshCw,
-  Check
-} from 'lucide-react';
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reporte de Incidencias - Tally Form</title>
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- React & ReactDOM CDN -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone para transpilar JSX en el navegador -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-const firebaseConfigStr = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-let firebaseConfig = {};
-try {
-  firebaseConfig = JSON.parse(firebaseConfigStr);
-} catch (e) {
-  console.error("Firebase config parse error", e);
-}
-
-const app = firebaseConfig.apiKey ? initializeApp(firebaseConfig) : null;
-const auth = app ? getAuth(app) : null;
-const db = app ? getFirestore(app) : null;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'incidencias-tally-app';
-
-// Helper to guarantee auth user resolution before Firestore operations
-const getAuthUser = async () => {
-  if (!auth) return null;
-  if (auth.currentUser) return auth.currentUser;
-  return new Promise((resolve) => {
-    const unsub = onAuthStateChanged(auth, (u) => {
-      unsub();
-      resolve(u);
-    });
-  });
-};
-
-/* Default Catalogs fallback if Firebase hasn't loaded custom options yet */
-const DEFAULT_CATALOGS = {
-  sucursales: [
-    'JESUS MARIA',
-    'CENTRO HISTORICO',
-    'NORTE - PLAZA',
-    'SUR - INDUSTRIAL',
-    'ORIENTE - GARZA',
-    'PONIENTE - CERRO'
-  ],
-  reportoList: [
-    'Gladys Alejandra Cuellar Gamez',
-    'Carlos Alberto Mendoza Cruz',
-    'María Elena Torres Delgado',
-    'José Luis Hernández Reyes',
-    'Ana Sofia Ramos Ramírez'
-  ],
-  eventosList: [
-    'SUSTRACCIÓN DE MERCANCÍA',
-    'HECHO DE TRÁNSITO TERRESTRE',
-    'DAÑO A INSTALACIONES',
-    'EXTORSION O FRAUDE',
-    'ACCIDENTE LABORAL',
-    'OTRO / INCIDENCIA GENERAL'
-  ]
-};
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
-  const [adminUsername, setAdminUsername] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [loginError, setLoginError] = useState('');
-
-  const [toast, setToast] = useState(null);
-  const [confirmModal, setConfirmModal] = useState(null);
-
-  const [activeTab, setActiveTab] = useState('formulario'); // 'formulario' | 'listado' | 'configuracion'
-  const [currentStep, setCurrentStep] = useState(1);
-
-  // Cloud Data
-  const [incidents, setIncidents] = useState([]);
-  const [catalogs, setCatalogs] = useState(DEFAULT_CATALOGS);
-  const [loadingCloud, setLoadingCloud] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [successMsg, setSuccessMsg] = useState('');
-
-  // Catalog Edit State (Admin)
-  const [newSucursal, setNewSucursal] = useState('');
-  const [newReporto, setNewReporto] = useState('');
-  const [newEvent, setNewEvent] = useState('');
-
-  // Form State
-  const [formData, setFormData] = useState({
-    fecha: new Date().toISOString().split('T')[0],
-    horaForm: new Date().toTimeString().slice(0, 5),
-    sucursal: '',
-    horaEvento: new Date().toTimeString().slice(0, 5),
-    reporto: '',
-    evento: '',
-    quienReportaText: '',
-    montoTotal: '',
-    // File uploads (Base64)
-    fotoInventario: null,
-    fotoSospechoso: null,
-    evidenciaHechos: null,
-    fotosVehiculo: null
-  });
-
-  // Filter and Modal state for list view
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterSucursal, setFilterSucursal] = useState('ALL');
-  const [filterEvento, setFilterEvento] = useState('ALL');
-  const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
-
-  useEffect(() => {
-    if (!auth) return;
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.error("Auth initialization error:", err);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!db || !user) return;
-    const sessionDocRef = doc(db, 'artifacts', appId, 'users', user.uid, 'session', 'admin');
-    const unsubSession = onSnapshot(sessionDocRef, (docSnap) => {
-      if (docSnap.exists() && docSnap.data()?.isAdminLoggedIn) {
-        setIsAdminLoggedIn(true);
-      }
-    }, (err) => console.error("Error listening to admin session:", err));
-
-    return () => unsubSession();
-  }, [user]);
-
-  const setAdminSessionInCloud = async (isLoggedIn) => {
-    try {
-      const currentUser = user || (await getAuthUser());
-      if (db && currentUser) {
-        const sessionDocRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'session', 'admin');
-        await setDoc(sessionDocRef, { isAdminLoggedIn: isLoggedIn, lastLogin: new Date().toISOString() }, { merge: true });
-      }
-    } catch (err) {
-      console.error("Error saving admin session:", err);
+  <!-- Fuentes e Íconos -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
     }
-  };
+    .animate-fade-in { animation: fadeIn 0.25s ease-out forwards; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 antialiased min-h-screen">
+  <div id="root"></div>
 
-  const showToast = (message, type = 'info') => {
-    setToast({ message, type });
-    setTimeout(() => {
-      setToast(null);
-    }, 3500);
-  };
+  <script type="text/babel">
+    const { useState, useEffect } = React;
 
-  const handleFileUpload = (e, fieldKey) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    // --- COMPONENTES DE ÍCONOS SVG AUTOCONTENIDOS ---
+    const IconWrapper = ({ children, className = "w-4 h-4" }) => (
+      <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        {children}
+      </svg>
+    );
 
-    if (file.size > 12 * 1024 * 1024) {
-      showToast("El archivo excede el tamaño máximo permitido de 12MB.", "error");
-      return;
-    }
+    const IconPlusCircle = (p) => <IconWrapper {...p}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></IconWrapper>;
+    const IconClipboardList = (p) => <IconWrapper {...p}><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/></IconWrapper>;
+    const IconSettings = (p) => <IconWrapper {...p}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></IconWrapper>;
+    const IconLock = (p) => <IconWrapper {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconWrapper>;
+    const IconLogIn = (p) => <IconWrapper {...p}><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></IconWrapper>;
+    const IconArrowRight = (p) => <IconWrapper {...p}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></IconWrapper>;
+    const IconArrowLeft = (p) => <IconWrapper {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></IconWrapper>;
+    const IconCheckCircle = (p) => <IconWrapper {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconWrapper>;
+    const IconAlertTriangle = (p) => <IconWrapper {...p}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></IconWrapper>;
+    const IconUploadCloud = (p) => <IconWrapper {...p}><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/><polyline points="16 16 12 12 8 16"/></IconWrapper>;
+    const IconX = (p) => <IconWrapper {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconWrapper>;
+    const IconSearch = (p) => <IconWrapper {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></IconWrapper>;
+    const IconFileSpreadsheet = (p) => <IconWrapper {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M12 13v8"/></IconWrapper>;
+    const IconEye = (p) => <IconWrapper {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></IconWrapper>;
+    const IconTrash2 = (p) => <IconWrapper {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconWrapper>;
+    const IconMapPin = (p) => <IconWrapper {...p}><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></IconWrapper>;
+    const IconUser = (p) => <IconWrapper {...p}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></IconWrapper>;
+    const IconPlus = (p) => <IconWrapper {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></IconWrapper>;
+    const IconRefreshCw = (p) => <IconWrapper {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></IconWrapper>;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFormData((prev) => ({
-        ...prev,
-        [fieldKey]: {
-          name: file.name,
-          type: file.type,
-          data: reader.result
-        }
-      }));
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const saveCatalogsToCloud = async (updatedCatalogs) => {
-    try {
-      const currentUser = user || (await getAuthUser());
-      if (!db || !currentUser) {
-        showToast("Error de conexión con la nube", "error");
-        return false;
-      }
-      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'catalogs', 'options');
-      await setDoc(docRef, updatedCatalogs, { merge: true });
-      return true;
-    } catch (err) {
-      console.error("Error saving catalog options:", err);
-      showToast("Error guardando cambios en la nube: " + err.message, "error");
-      return false;
-    }
-  };
-
-  const handleAddCatalogItem = async (category, value, resetSetter, categoryLabel) => {
-    if (!value || !value.trim()) return;
-    const trimmedVal = value.trim();
-    const currentList = catalogs[category] || [];
-    
-    if (currentList.some((item) => item.toLowerCase() === trimmedVal.toLowerCase())) {
-      showToast(`La opción "${trimmedVal}" ya existe en ${categoryLabel || 'la lista'}.`, 'warning');
-      return;
-    }
-
-    const newList = [...currentList, trimmedVal];
-    const updated = { ...catalogs, [category]: newList };
-
-    const success = await saveCatalogsToCloud(updated);
-    if (success) {
-      setCatalogs(updated);
-      resetSetter('');
-      showToast(`"${trimmedVal}" agregada y guardada en la nube.`, 'success');
-    }
-  };
-
-  const handleDeleteCatalogItem = (category, itemToDelete, categoryLabel) => {
-    if (!isAdminLoggedIn) return;
-    
-    setConfirmModal({
-      title: `Eliminar de ${categoryLabel || 'Catálogo'}`,
-      message: `¿Está seguro de eliminar la opción "${itemToDelete}"? El cambio se guardará en la nube para todos.`,
-      onConfirm: async () => {
-        const currentList = catalogs[category] || [];
-        const newList = currentList.filter((item) => item !== itemToDelete);
-        const updated = { ...catalogs, [category]: newList };
-        
-        const success = await saveCatalogsToCloud(updated);
-        if (success) {
-          setCatalogs(updated);
-          showToast(`Opción "${itemToDelete}" eliminada y actualizada en la nube.`, 'info');
-        }
-        setConfirmModal(null);
-      }
-    });
-  };
-
-  const handleAdminLogin = async (e) => {
-    e.preventDefault();
-    if (adminUsername.toLowerCase() === 'admin' && adminPassword === 'admin123') {
-      setIsAdminLoggedIn(true);
-      setLoginError('');
-      setAdminPassword('');
-      await setAdminSessionInCloud(true);
-      showToast("Sesión de administrador iniciada y guardada", "success");
-    } else {
-      setLoginError('Usuario o contraseña incorrectos. (Demo: admin / admin123)');
-    }
-  };
-
-  const handleAdminLogout = async () => {
-    setIsAdminLoggedIn(false);
-    await setAdminSessionInCloud(false);
-    showToast("Sesión de administrador cerrada", "info");
-  };
-
-  const handleSubmitForm = async (e) => {
-    e.preventDefault();
-    setSubmitting(true);
-    setSuccessMsg('');
-
-    const newRecord = {
-      ...formData,
-      createdAt: new Date().toISOString(),
-      status: 'REGISTRADO'
+    /* Catalogo por defecto */
+    const DEFAULT_CATALOGS = {
+      sucursales: [
+        'JESUS MARIA',
+        'CENTRO HISTORICO',
+        'NORTE - PLAZA',
+        'SUR - INDUSTRIAL',
+        'ORIENTE - GARZA',
+        'PONIENTE - CERRO'
+      ],
+      reportoList: [
+        'Gladys Alejandra Cuellar Gamez',
+        'Carlos Alberto Mendoza Cruz',
+        'María Elena Torres Delgado',
+        'José Luis Hernández Reyes',
+        'Ana Sofia Ramos Ramírez'
+      ],
+      eventosList: [
+        'SUSTRACCIÓN DE MERCANCÍA',
+        'HECHO DE TRÁNSITO TERRESTRE',
+        'DAÑO A INSTALACIONES',
+        'EXTORSION O FRAUDE',
+        'ACCIDENTE LABORAL',
+        'OTRO / INCIDENCIA GENERAL'
+      ]
     };
 
-    try {
-      const currentUser = user || (await getAuthUser());
-      if (db && currentUser) {
-        const newDocRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'incidents'));
-        await setDoc(newDocRef, newRecord);
-      } else {
-        const updated = [ { id: 'local-' + Date.now(), ...newRecord }, ...incidents ];
-        setIncidents(updated);
-      }
+    function App() {
+      const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+      const [adminUsername, setAdminUsername] = useState('');
+      const [adminPassword, setAdminPassword] = useState('');
+      const [loginError, setLoginError] = useState('');
 
-      setSuccessMsg('¡El reporte ha sido enviado y guardado permanentemente!');
-      setSubmitting(false);
-      setCurrentStep(1);
+      const [toast, setToast] = useState(null);
+      const [confirmModal, setConfirmModal] = useState(null);
 
-      // Reset Form
-      setFormData({
+      const [activeTab, setActiveTab] = useState('formulario'); // 'formulario' | 'listado' | 'configuracion' | 'login'
+      const [currentStep, setCurrentStep] = useState(1);
+
+      // Persistence with LocalStorage
+      const [catalogs, setCatalogs] = useState(() => {
+        try {
+          const saved = localStorage.getItem('tally_catalogs');
+          return saved ? JSON.parse(saved) : DEFAULT_CATALOGS;
+        } catch(e) {
+          return DEFAULT_CATALOGS;
+        }
+      });
+
+      const [incidents, setIncidents] = useState(() => {
+        try {
+          const saved = localStorage.getItem('tally_incidents');
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) {
+          return [];
+        }
+      });
+
+      const [submitting, setSubmitting] = useState(false);
+      const [successMsg, setSuccessMsg] = useState('');
+
+      // Catalog Edit State
+      const [newSucursal, setNewSucursal] = useState('');
+      const [newReporto, setNewReporto] = useState('');
+      const [newEvent, setNewEvent] = useState('');
+
+      // Form State
+      const [formData, setFormData] = useState({
         fecha: new Date().toISOString().split('T')[0],
         horaForm: new Date().toTimeString().slice(0, 5),
         sucursal: catalogs.sucursales[0] || '',
@@ -335,1199 +141,972 @@ export default function App() {
         fotosVehiculo: null
       });
 
-      setTimeout(() => {
-        setSuccessMsg('');
-        setActiveTab('listado');
-      }, 2000);
-    } catch (err) {
-      console.error("Error submitting incident:", err);
-      showToast("Error al enviar el reporte. Por favor intente nuevamente.", "error");
-      setSubmitting(false);
-    }
-  };
+      // Filter & Modal State
+      const [searchTerm, setSearchTerm] = useState('');
+      const [filterSucursal, setFilterSucursal] = useState('ALL');
+      const [filterEvento, setFilterEvento] = useState('ALL');
+      const [selectedIncidentModal, setSelectedIncidentModal] = useState(null);
 
-  const handleDeleteIncident = async (id) => {
-    if (!isAdminLoggedIn) return;
-    
-    setConfirmModal({
-      title: "Eliminar Registro",
-      message: "¿Está seguro de eliminar esta incidencia permanentemente?",
-      onConfirm: async () => {
+      // Persist Catalogs
+      useEffect(() => {
         try {
-          const currentUser = user || (await getAuthUser());
-          if (db && currentUser) {
-            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'incidents', id));
-          } else {
-            setIncidents(incidents.filter((i) => i.id !== id));
-          }
-          if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
-          showToast("Incidencia eliminada exitosamente de la nube.", "info");
-        } catch (err) {
-          console.error("Error deleting incident:", err);
-          showToast("No se pudo eliminar la incidencia.", "error");
+          localStorage.setItem('tally_catalogs', JSON.stringify(catalogs));
+        } catch(e) { console.error(e); }
+      }, [catalogs]);
+
+      // Persist Incidents
+      useEffect(() => {
+        try {
+          localStorage.setItem('tally_incidents', JSON.stringify(incidents));
+        } catch(e) { console.error(e); }
+      }, [incidents]);
+
+      const showToast = (message, type = 'info') => {
+        setToast({ message, type });
+        setTimeout(() => setToast(null), 3500);
+      };
+
+      const handleFileUpload = (e, fieldKey) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        if (file.size > 12 * 1024 * 1024) {
+          showToast("El archivo excede el tamaño máximo permitido de 12MB.", "error");
+          return;
         }
-        setConfirmModal(null);
-      }
-    });
-  };
 
-  const handleUpdateStatus = async (id, newStatus) => {
-    if (!isAdminLoggedIn) return;
-    try {
-      const currentUser = user || (await getAuthUser());
-      if (db && currentUser) {
-        const item = incidents.find((i) => i.id === id);
-        if (item) {
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'incidents', id), {
-            ...item,
-            status: newStatus,
-            updatedAt: new Date().toISOString()
-          }, { merge: true });
-          showToast(`Estado actualizado a ${newStatus} y guardado en la nube`, "success");
-        }
-      }
-    } catch (err) {
-      console.error("Error updating status:", err);
-      showToast("Error al actualizar el estado", "error");
-    }
-  };
-
-  useEffect(() => {
-    if (!db || !user) {
-      setLoadingCloud(false);
-      return;
-    }
-
-    // 1. Realtime listener for Incidents
-    const incidentsCol = collection(db, 'artifacts', appId, 'public', 'data', 'incidents');
-    const unsubIncidents = onSnapshot(
-      incidentsCol,
-      (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        docs.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-        setIncidents(docs);
-        setLoadingCloud(false);
-      },
-      (error) => {
-        console.error("Error fetching incidents:", error);
-        setLoadingCloud(false);
-      }
-    );
-
-    // 2. Realtime listener for Catalogs options document
-    const catalogDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'catalogs', 'options');
-    const unsubCatalogs = onSnapshot(
-      catalogDocRef,
-      (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const updatedCat = {
-            sucursales: Array.isArray(data.sucursales) ? data.sucursales : DEFAULT_CATALOGS.sucursales,
-            reportoList: Array.isArray(data.reportoList) ? data.reportoList : DEFAULT_CATALOGS.reportoList,
-            eventosList: Array.isArray(data.eventosList) ? data.eventosList : DEFAULT_CATALOGS.eventosList
-          };
-          setCatalogs(updatedCat);
+        const reader = new FileReader();
+        reader.onloadend = () => {
           setFormData((prev) => ({
             ...prev,
-            sucursal: prev.sucursal || (updatedCat.sucursales[0] || ''),
-            reporto: prev.reporto || (updatedCat.reportoList[0] || ''),
-            evento: prev.evento || (updatedCat.eventosList[0] || '')
+            [fieldKey]: {
+              name: file.name,
+              type: file.type,
+              data: reader.result
+            }
           }));
-        } else {
-          // Initialize cloud document with default values on first load
-          setDoc(catalogDocRef, DEFAULT_CATALOGS).catch((err) => console.error("Error initializing catalogs:", err));
-          setCatalogs(DEFAULT_CATALOGS);
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const handleAddCatalogItem = (category, value, resetSetter, categoryLabel) => {
+        if (!value || !value.trim()) return;
+        const trimmedVal = value.trim();
+        const currentList = catalogs[category] || [];
+        
+        if (currentList.some((item) => item.toLowerCase() === trimmedVal.toLowerCase())) {
+          showToast(`La opción "${trimmedVal}" ya existe en ${categoryLabel || 'la lista'}.`, 'warning');
+          return;
         }
-      },
-      (error) => {
-        console.error("Error fetching catalogs:", error);
-      }
-    );
 
-    return () => {
-      unsubIncidents();
-      unsubCatalogs();
-    };
-  }, [user]);
+        const updated = { ...catalogs, [category]: [...currentList, trimmedVal] };
+        setCatalogs(updated);
+        resetSetter('');
+        showToast(`"${trimmedVal}" agregada con éxito.`, 'success');
+      };
 
-  const exportToExcel = () => {
-    if (incidents.length === 0) {
-      showToast("No hay registros disponibles para exportar.", "warning");
-      return;
-    }
+      const handleDeleteCatalogItem = (category, itemToDelete, categoryLabel) => {
+        if (!isAdminLoggedIn) return;
+        
+        setConfirmModal({
+          title: `Eliminar de ${categoryLabel || 'Catálogo'}`,
+          message: `¿Está seguro de eliminar la opción "${itemToDelete}"?`,
+          onConfirm: () => {
+            const currentList = catalogs[category] || [];
+            const updated = { ...catalogs, [category]: currentList.filter((item) => item !== itemToDelete) };
+            setCatalogs(updated);
+            showToast(`Opción "${itemToDelete}" eliminada.`, 'info');
+            setConfirmModal(null);
+          }
+        });
+      };
 
-    const headers = [
-      "ID",
-      "Fecha",
-      "Hora Registro",
-      "Sucursal",
-      "Hora Evento",
-      "Reportó (Lista)",
-      "Evento / Tipo Incidencia",
-      "Quién Reporta (Detalle)",
-      "Monto Total ($)",
-      "Estado",
-      "Tiene Foto Inventario",
-      "Tiene Foto Sospechoso",
-      "Tiene Evidencia Hechos",
-      "Tiene Fotos Vehículo"
-    ];
+      const handleAdminLogin = (e) => {
+        e.preventDefault();
+        if (adminUsername.toLowerCase() === 'admin' && adminPassword === 'admin123') {
+          setIsAdminLoggedIn(true);
+          setLoginError('');
+          setAdminPassword('');
+          showToast("Sesión de administrador iniciada", "success");
+          setActiveTab('formulario');
+        } else {
+          setLoginError('Usuario o contraseña incorrectos. (Demo: admin / admin123)');
+        }
+      };
 
-    const rows = incidents.map((inc) => [
-      inc.id,
-      inc.fecha || '',
-      inc.horaForm || '',
-      `"${inc.sucursal || ''}"`,
-      inc.horaEvento || '',
-      `"${inc.reporto || ''}"`,
-      `"${inc.evento || ''}"`,
-      `"${inc.quienReportaText || ''}"`,
-      inc.montoTotal || '0',
-      inc.status || 'REGISTRADO',
-      inc.fotoInventario ? "SÍ" : "NO",
-      inc.fotoSospechoso ? "SÍ" : "NO",
-      inc.evidenciaHechos ? "SÍ" : "NO",
-      inc.fotosVehiculo ? "SÍ" : "NO"
-    ]);
+      const handleAdminLogout = () => {
+        setIsAdminLoggedIn(false);
+        showToast("Sesión de administrador cerrada", "info");
+      };
 
-    const csvContent =
-      "data:text/csv;charset=utf-8,\uFEFF" +
-      [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+      const handleSubmitForm = (e) => {
+        e.preventDefault();
+        setSubmitting(true);
+        setSuccessMsg('');
 
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Reporte_Incidencias_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+        const newRecord = {
+          id: 'INC-' + Math.floor(100000 + Math.random() * 900000),
+          ...formData,
+          createdAt: new Date().toISOString(),
+          status: 'REGISTRADO'
+        };
 
-  /* Filtered Incidents */
-  const filteredIncidents = incidents.filter((inc) => {
-    const matchesSearch =
-      (inc.sucursal || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inc.evento || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inc.reporto || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (inc.quienReportaText || '').toLowerCase().includes(searchTerm.toLowerCase());
+        setTimeout(() => {
+          setIncidents((prev) => [newRecord, ...prev]);
+          setSuccessMsg('¡El reporte ha sido registrado exitosamente!');
+          setSubmitting(false);
+          setCurrentStep(1);
 
-    const matchesSucursal = filterSucursal === 'ALL' || inc.sucursal === filterSucursal;
-    const matchesEvento = filterEvento === 'ALL' || inc.evento === filterEvento;
+          // Reset Form
+          setFormData({
+            fecha: new Date().toISOString().split('T')[0],
+            horaForm: new Date().toTimeString().slice(0, 5),
+            sucursal: catalogs.sucursales[0] || '',
+            horaEvento: new Date().toTimeString().slice(0, 5),
+            reporto: catalogs.reportoList[0] || '',
+            evento: catalogs.eventosList[0] || '',
+            quienReportaText: '',
+            montoTotal: '',
+            fotoInventario: null,
+            fotoSospechoso: null,
+            evidenciaHechos: null,
+            fotosVehiculo: null
+          });
 
-    return matchesSearch && matchesSucursal && matchesEvento;
-  });
+          setTimeout(() => {
+            setSuccessMsg('');
+            setActiveTab('listado');
+          }, 1800);
+        }, 600);
+      };
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col">
-      {}
-      <header className="bg-[#023047] text-white shadow-md sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-[#FFB701] flex items-center justify-center text-[#023047] font-extrabold text-xl shadow">
-              R
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <h1 className="font-bold text-lg leading-tight tracking-wide">REPORTE DE INCIDENCIAS</h1>
-                <span className="flex items-center text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30" title="Guardado automático habilitado en la nube">
-                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span>
-                  Guardado Auto (Nube)
-                </span>
-              </div>
-              <p className="text-xs text-[#8ECAE6]">Sincronización en tiempo real • Tally Form</p>
-            </div>
-          </div>
+      const handleDeleteIncident = (id) => {
+        if (!isAdminLoggedIn) return;
+        
+        setConfirmModal({
+          title: "Eliminar Registro",
+          message: "¿Está seguro de eliminar esta incidencia permanentemente?",
+          onConfirm: () => {
+            setIncidents((prev) => prev.filter((i) => i.id !== id));
+            if (selectedIncidentModal?.id === id) setSelectedIncidentModal(null);
+            showToast("Incidencia eliminada exitosamente.", "info");
+            setConfirmModal(null);
+          }
+        });
+      };
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center space-x-1 sm:space-x-2 bg-[#011e2d] p-1.5 rounded-xl text-sm font-medium">
-            <button
-              onClick={() => setActiveTab('formulario')}
-              className={`flex items-center px-3 py-1.5 rounded-lg transition ${
-                activeTab === 'formulario'
-                  ? 'bg-[#209EBB] text-white font-semibold shadow'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              <PlusCircle className="w-4 h-4 mr-1.5" />
-              Nuevo Reporte
-            </button>
+      const handleUpdateStatus = (id, newStatus) => {
+        if (!isAdminLoggedIn) return;
+        setIncidents((prev) => prev.map((inc) => inc.id === id ? { ...inc, status: newStatus } : inc));
+        showToast(`Estado actualizado a ${newStatus}`, "success");
+      };
 
-            <button
-              onClick={() => setActiveTab('listado')}
-              className={`flex items-center px-3 py-1.5 rounded-lg transition ${
-                activeTab === 'listado'
-                  ? 'bg-[#209EBB] text-white font-semibold shadow'
-                  : 'text-slate-300 hover:text-white hover:bg-white/10'
-              }`}
-            >
-              <ClipboardList className="w-4 h-4 mr-1.5" />
-              Historial ({incidents.length})
-            </button>
+      const exportToExcel = () => {
+        if (incidents.length === 0) {
+          showToast("No hay registros disponibles para exportar.", "warning");
+          return;
+        }
 
-            {isAdminLoggedIn && (
-              <button
-                onClick={() => setActiveTab('configuracion')}
-                className={`flex items-center px-3 py-1.5 rounded-lg transition ${
-                  activeTab === 'configuracion'
-                    ? 'bg-[#FFB701] text-[#023047] font-bold shadow'
-                    : 'text-amber-300 hover:text-amber-100 hover:bg-white/10'
-                }`}
-              >
-                <Settings className="w-4 h-4 mr-1.5" />
-                Catálogos
-              </button>
-            )}
-          </nav>
+        const headers = ["ID", "Fecha", "Hora Registro", "Sucursal", "Hora Evento", "Reportó", "Evento", "Quien Reporta", "Monto Total", "Estado"];
+        const rows = incidents.map((inc) => [
+          inc.id, inc.fecha || '', inc.horaForm || '', `"${inc.sucursal || ''}"`, inc.horaEvento || '',
+          `"${inc.reporto || ''}"`, `"${inc.evento || ''}"`, `"${inc.quienReportaText || ''}"`,
+          inc.montoTotal || '0', inc.status || 'REGISTRADO'
+        ]);
 
-          {/* User Auth Status */}
-          <div className="flex items-center space-x-2">
-            {isAdminLoggedIn ? (
-              <div className="flex items-center bg-[#FFB701]/20 border border-[#FFB701]/40 rounded-lg px-2.5 py-1 text-xs text-[#FFB701]">
-                <Lock className="w-3.5 h-3.5 mr-1" />
-                <span className="font-semibold mr-2">Modo Admin</span>
-                <button
-                  onClick={handleAdminLogout}
-                  className="hover:text-red-300 transition underline ml-1"
-                  title="Cerrar sesión de administrador"
-                >
-                  Salir
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setActiveTab('login')}
-                className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg transition"
-              >
-                <LogIn className="w-3.5 h-3.5 mr-1 text-[#8ECAE6]" />
-                Acceso Admin
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+        const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `Reporte_Incidencias_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      };
 
-      {}
-      <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
-        {/* Success Alert Banner */}
-        {successMsg && (
-          <div className="mb-6 p-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl flex items-center shadow-sm animate-fade-in">
-            <CheckCircle className="w-6 h-6 mr-3 text-emerald-600 flex-shrink-0" />
-            <p className="font-semibold text-sm">{successMsg}</p>
-          </div>
-        )}
+      const filteredIncidents = incidents.filter((inc) => {
+        const matchesSearch =
+          (inc.sucursal || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (inc.evento || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (inc.reporto || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (inc.quienReportaText || '').toLowerCase().includes(searchTerm.toLowerCase());
 
-        {/* ========================================================================= */}
-        {/* TAB 1: FORMULARIO MULTI-PASO (TALLY STYLE)                                 */}
-        {/* ========================================================================= */}
-        {activeTab === 'formulario' && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-6 sm:p-10 max-w-2xl mx-auto">
-              <h2 className="text-2xl sm:text-3xl font-black text-[#023047] tracking-tight uppercase mb-8">
-                REPORTE DE INCIDENCIAS
-              </h2>
+        const matchesSucursal = filterSucursal === 'ALL' || inc.sucursal === filterSucursal;
+        const matchesEvento = filterEvento === 'ALL' || inc.evento === filterEvento;
 
-              {/* Step indicator */}
-              <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-100 text-xs font-semibold text-slate-400">
-                <span className={currentStep === 1 ? "text-[#209EBB] font-bold" : ""}>
-                  PASO 1 DE 2: INFORMACIÓN GENERAL
-                </span>
-                <span className={currentStep === 2 ? "text-[#209EBB] font-bold" : ""}>
-                  PASO 2 DE 2: DETALLES Y EVIDENCIAS
-                </span>
-              </div>
+        return matchesSearch && matchesSucursal && matchesEvento;
+      });
 
-              <form onSubmit={handleSubmitForm}>
-                {/* ---------------- PASO 1 ---------------- */}
-                {currentStep === 1 && (
-                  <div className="space-y-6 animate-fade-in">
-                    {/* Fecha y Hora */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        Fecha y hora: <span className="text-red-500">*</span>
-                      </label>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <input
-                          type="date"
-                          required
-                          value={formData.fecha}
-                          onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                          className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                        />
-                        <input
-                          type="time"
-                          required
-                          value={formData.horaForm}
-                          onChange={(e) => setFormData({ ...formData, horaForm: e.target.value })}
-                          className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Sucursal (Dynamic Dropdown) */}
-                    <div>
-                      {}
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-semibold text-slate-800">
-                          Sucursal <span className="text-red-500">*</span>
-                        </label>
-                        {isAdminLoggedIn && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('configuracion')}
-                            className="text-xs text-[#209EBB] hover:text-[#023047] font-semibold flex items-center transition"
-                          >
-                            <Settings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" />
-                            Gestionar Lista
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        required
-                        value={formData.sucursal}
-                        onChange={(e) => setFormData({ ...formData, sucursal: e.target.value })}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                      >
-                        {catalogs.sucursales.map((suc, idx) => (
-                          <option key={idx} value={suc}>
-                            {suc}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Hora del evento */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        Hora del evento: <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="time"
-                        required
-                        value={formData.horaEvento}
-                        onChange={(e) => setFormData({ ...formData, horaEvento: e.target.value })}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                      />
-                    </div>
-
-                    {/* Reportó (Dynamic Dropdown) */}
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-semibold text-slate-800">
-                          Reportó: <span className="text-red-500">*</span>
-                        </label>
-                        {isAdminLoggedIn && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('configuracion')}
-                            className="text-xs text-[#209EBB] hover:text-[#023047] font-semibold flex items-center transition"
-                          >
-                            <Settings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" />
-                            Gestionar Lista
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        required
-                        value={formData.reporto}
-                        onChange={(e) => setFormData({ ...formData, reporto: e.target.value })}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                      >
-                        {catalogs.reportoList.map((rep, idx) => (
-                          <option key={idx} value={rep}>
-                            {rep}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Step 1 Next Button */}
-                    <div className="pt-4">
-                      <button
-                        type="button"
-                        onClick={() => setCurrentStep(2)}
-                        className="inline-flex items-center px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-medium text-sm rounded-lg transition shadow-sm hover:shadow"
-                      >
-                        Continuar <ArrowRight className="w-4 h-4 ml-2" />
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ---------------- PASO 2 ---------------- */}
-                {currentStep === 2 && (
-                  <div className="space-y-6 animate-fade-in">
-                    {/* Evento (Dynamic Dropdown) */}
-                    <div>
-                      <div className="flex justify-between items-center mb-2">
-                        <label className="block text-sm font-semibold text-slate-800">
-                          Evento: <span className="text-red-500">*</span>
-                        </label>
-                        {isAdminLoggedIn && (
-                          <button
-                            type="button"
-                            onClick={() => setActiveTab('configuracion')}
-                            className="text-xs text-[#209EBB] hover:text-[#023047] font-semibold flex items-center transition"
-                          >
-                            <Settings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" />
-                            Gestionar Lista
-                          </button>
-                        )}
-                      </div>
-                      <select
-                        required
-                        value={formData.evento}
-                        onChange={(e) => setFormData({ ...formData, evento: e.target.value })}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                      >
-                        {catalogs.eventosList.map((ev, idx) => (
-                          <option key={idx} value={ev}>
-                            {ev}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Quien reporta (Texto Libre / Nombre del informante) */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        Quien reporta: <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Nombre completo o cargo de quien reporta"
-                        value={formData.quienReportaText}
-                        onChange={(e) => setFormData({ ...formData, quienReportaText: e.target.value })}
-                        className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                      />
-                    </div>
-
-                    {/* Foto del inventario en caso de sustracción de mercancía */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-1">
-                        Foto del inventario en caso de sustracción de mercancía:
-                      </label>
-                      <UploadBox
-                        id="fotoInventario"
-                        fileData={formData.fotoInventario}
-                        onChange={(e) => handleFileUpload(e, 'fotoInventario')}
-                        onRemove={() => setFormData({ ...formData, fotoInventario: null })}
-                      />
-                    </div>
-
-                    {/* Foto del sospechoso */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-1">
-                        Foto del sospechoso:
-                      </label>
-                      <UploadBox
-                        id="fotoSospechoso"
-                        fileData={formData.fotoSospechoso}
-                        onChange={(e) => handleFileUpload(e, 'fotoSospechoso')}
-                        onRemove={() => setFormData({ ...formData, fotoSospechoso: null })}
-                      />
-                    </div>
-
-                    {/* Monto Total */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-2">
-                        Monto Total <span className="text-red-500">*</span>
-                      </label>
-                      <div className="relative">
-                        <span className="absolute left-3.5 top-2.5 text-slate-400 font-medium text-sm">$</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          placeholder="0.00"
-                          value={formData.montoTotal}
-                          onChange={(e) => setFormData({ ...formData, montoTotal: e.target.value })}
-                          className="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Evidencia de los hechos */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-1">
-                        Evidencia de los hechos:
-                      </label>
-                      <UploadBox
-                        id="evidenciaHechos"
-                        fileData={formData.evidenciaHechos}
-                        onChange={(e) => handleFileUpload(e, 'evidenciaHechos')}
-                        onRemove={() => setFormData({ ...formData, evidenciaHechos: null })}
-                      />
-                    </div>
-
-                    {/* En caso de que la incidencia sea "HECHO DE TRANSITO TERRESTRE" */}
-                    <div>
-                      <label className="block text-sm font-semibold text-slate-800 mb-1 leading-snug">
-                        En caso de que la incidencia sea "HECHO DE TRANSITO TERRESTRE" favor de subir las fotos del vehículo, por ambos costados, de frente y detrás:
-                      </label>
-                      <UploadBox
-                        id="fotosVehiculo"
-                        fileData={formData.fotosVehiculo}
-                        onChange={(e) => handleFileUpload(e, 'fotosVehiculo')}
-                        onRemove={() => setFormData({ ...formData, fotosVehiculo: null })}
-                      />
-                    </div>
-
-                    {/* Step 2 Actions */}
-                    <div className="pt-6 flex items-center justify-between border-t border-slate-100">
-                      <button
-                        type="button"
-                        onClick={() => setCurrentStep(1)}
-                        className="inline-flex items-center px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 font-medium text-sm rounded-lg transition"
-                      >
-                        <ArrowLeft className="w-4 h-4 mr-1.5" /> Volver al Paso 1
-                      </button>
-
-                      <button
-                        type="submit"
-                        disabled={submitting}
-                        className="inline-flex items-center px-8 py-2.5 bg-black hover:bg-slate-800 text-white font-semibold text-sm rounded-lg transition shadow hover:shadow-md disabled:opacity-50"
-                      >
-                        {submitting ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando...
-                          </>
-                        ) : (
-                          <>
-                            Enviar <ArrowRight className="w-4 h-4 ml-2" />
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 2: LISTADO DE INCIDENCIAS (TABLA Y FILTROS)                             */}
-        {/* ========================================================================= */}
-        {activeTab === 'listado' && (
-          <div className="space-y-4">
-            {/* Action Toolbar */}
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
-              <div className="flex-1 w-full md:w-auto relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                <input
-                  type="text"
-                  placeholder="Buscar por sucursal, evento, reportó..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#209EBB]"
-                />
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-                {/* Filter Sucursal */}
-                <select
-                  value={filterSucursal}
-                  onChange={(e) => setFilterSucursal(e.target.value)}
-                  className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 focus:outline-none"
-                >
-                  <option value="ALL">Todas las Sucursales</option>
-                  {catalogs.sucursales.map((s, i) => (
-                    <option key={i} value={s}>{s}</option>
-                  ))}
-                </select>
-
-                {/* Filter Evento */}
-                <select
-                  value={filterEvento}
-                  onChange={(e) => setFilterEvento(e.target.value)}
-                  className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700 focus:outline-none"
-                >
-                  <option value="ALL">Todos los Eventos</option>
-                  {catalogs.eventosList.map((ev, i) => (
-                    <option key={i} value={ev}>{ev}</option>
-                  ))}
-                </select>
-
-                {/* Excel Export */}
-                <button
-                  onClick={exportToExcel}
-                  className="flex items-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-                >
-                  <FileSpreadsheet className="w-4 h-4 mr-1.5" />
-                  Excel / CSV
-                </button>
-              </div>
-            </div>
-
-            {/* Incident Cards / Table */}
-            {loadingCloud ? (
-              <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
-                <RefreshCw className="w-8 h-8 mx-auto text-[#209EBB] animate-spin mb-3" />
-                <p className="text-sm text-slate-500 font-medium">Sincronizando reportes desde la nube...</p>
-              </div>
-            ) : filteredIncidents.length === 0 ? (
-              <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
-                <AlertTriangle className="w-10 h-10 mx-auto text-amber-400 mb-2" />
-                <h3 className="font-bold text-slate-700 text-lg">No hay incidencias registradas</h3>
-                <p className="text-xs text-slate-500 mt-1">No se encontraron resultados para los filtros seleccionados.</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-slate-600">
-                    <thead className="bg-[#023047] text-[#8ECAE6] uppercase font-bold text-[11px] tracking-wider">
-                      <tr>
-                        <th className="p-3">Fecha / Hora</th>
-                        <th className="p-3">Sucursal</th>
-                        <th className="p-3">Evento</th>
-                        <th className="p-3">Reportó</th>
-                        <th className="p-3">Monto</th>
-                        <th className="p-3">Archivos</th>
-                        <th className="p-3">Estado</th>
-                        <th className="p-3 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {filteredIncidents.map((inc) => (
-                        <tr key={inc.id} className="hover:bg-slate-50 transition">
-                          <td className="p-3 whitespace-nowrap">
-                            <div className="font-medium text-slate-800">{inc.fecha}</div>
-                            <div className="text-[11px] text-slate-400">{inc.horaEvento || inc.horaForm} hs</div>
-                          </td>
-                          <td className="p-3 font-semibold text-[#023047]">{inc.sucursal}</td>
-                          <td className="p-3">
-                            <span className="inline-block bg-[#8ECAE6]/30 text-[#023047] font-semibold px-2 py-0.5 rounded">
-                              {inc.evento}
-                            </span>
-                          </td>
-                          <td className="p-3">
-                            <div className="font-medium text-slate-800">{inc.reporto}</div>
-                            <div className="text-[10px] text-slate-400">{inc.quienReportaText}</div>
-                          </td>
-                          <td className="p-3 font-bold text-slate-900">
-                            ${parseFloat(inc.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center space-x-1">
-                              {inc.fotoInventario && <span title="Foto Inventario" className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">Inv</span>}
-                              {inc.fotoSospechoso && <span title="Foto Sospechoso" className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded">Sosp</span>}
-                              {inc.evidenciaHechos && <span title="Evidencia Hechos" className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded">Evid</span>}
-                              {inc.fotosVehiculo && <span title="Foto Vehículo" className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded">Veh</span>}
-                            </div>
-                          </td>
-                          <td className="p-3">
-                            {isAdminLoggedIn ? (
-                              <select
-                                value={inc.status || 'REGISTRADO'}
-                                onChange={(e) => handleUpdateStatus(inc.id, e.target.value)}
-                                className="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 font-medium focus:outline-none"
-                              >
-                                <option value="REGISTRADO">REGISTRADO</option>
-                                <option value="EN REVISIÓN">EN REVISIÓN</option>
-                                <option value="RESUELTO">RESUELTO</option>
-                              </select>
-                            ) : (
-                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                inc.status === 'RESUELTO' ? 'bg-emerald-100 text-emerald-800' :
-                                inc.status === 'EN REVISIÓN' ? 'bg-amber-100 text-amber-800' :
-                                'bg-slate-100 text-slate-700'
-                              }`}>
-                                {inc.status || 'REGISTRADO'}
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-3 text-right whitespace-nowrap">
-                            <button
-                              onClick={() => setSelectedIncidentModal(inc)}
-                              className="p-1.5 text-slate-600 hover:text-[#209EBB] bg-slate-100 hover:bg-slate-200 rounded-md mr-1 transition"
-                              title="Ver Detalle"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </button>
-                            {isAdminLoggedIn && (
-                              <button
-                                onClick={() => handleDeleteIncident(inc.id)}
-                                className="p-1.5 text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded-md transition"
-                                title="Eliminar Incidencia"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
+          {/* HEADER PRINCIPAL */}
+          <header className="bg-[#023047] text-white shadow-md sticky top-0 z-30">
+            <div className="max-w-6xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-3">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-xl bg-[#FFB701] flex items-center justify-center text-[#023047] font-extrabold text-xl shadow">
+                  R
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* TAB 3: CONFIGURACIÓN DE CATÁLOGOS (SOLO ADMIN)                             */}
-        {/* ========================================================================= */}
-        {activeTab === 'configuracion' && isAdminLoggedIn && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
-            {}
-            <div className="border-b border-slate-100 pb-4 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-bold text-[#023047] flex items-center">
-                  <Settings className="w-5 h-5 mr-2 text-[#FFB701]" />
-                  Gestión de Listas y Catálogos (Sucursal, Reportó y Evento)
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Agrega o elimina elementos de los catálogos principales. Las modificaciones se reflejan en tiempo real para todos los usuarios.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {/* 1. SUCURSALES */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
                 <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-bold text-sm text-[#023047] flex items-center">
-                      <MapPin className="w-4 h-4 mr-1.5 text-[#209EBB]" /> Sucursales ({catalogs.sucursales.length})
-                    </h3>
-                  </div>
-                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
-                    {catalogs.sucursales.map((suc, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
-                        <span className="font-medium text-slate-700">{suc}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCatalogItem('sucursales', suc, 'Sucursales')}
-                          className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1 rounded transition"
-                          title="Eliminar opción"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Add new sucursal */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleAddCatalogItem('sucursales', newSucursal, setNewSucursal, 'Sucursales');
-                  }}
-                  className="flex items-center space-x-1.5 pt-2 border-t border-slate-200"
-                >
-                  <input
-                    type="text"
-                    placeholder="Nueva Sucursal..."
-                    value={newSucursal}
-                    onChange={(e) => setNewSucursal(e.target.value)}
-                    className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#209EBB]"
-                  />
-                  <button
-                    type="submit"
-                    className="p-1.5 bg-[#209EBB] hover:bg-[#1a859e] text-white rounded-lg transition"
-                    title="Agregar Sucursal"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </form>
-              </div>
-
-              {/* 2. REPORTÓ */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-bold text-sm text-[#023047] flex items-center">
-                      <User className="w-4 h-4 mr-1.5 text-[#209EBB]" /> Reportó ({catalogs.reportoList.length})
-                    </h3>
-                  </div>
-                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
-                    {catalogs.reportoList.map((rep, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
-                        <span className="font-medium text-slate-700">{rep}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCatalogItem('reportoList', rep, 'Reportó')}
-                          className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1 rounded transition"
-                          title="Eliminar opción"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Add new reportó */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleAddCatalogItem('reportoList', newReporto, setNewReporto, 'Reportó');
-                  }}
-                  className="flex items-center space-x-1.5 pt-2 border-t border-slate-200"
-                >
-                  <input
-                    type="text"
-                    placeholder="Nuevo Nombre/Cargo..."
-                    value={newReporto}
-                    onChange={(e) => setNewReporto(e.target.value)}
-                    className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#209EBB]"
-                  />
-                  <button
-                    type="submit"
-                    className="p-1.5 bg-[#209EBB] hover:bg-[#1a859e] text-white rounded-lg transition"
-                    title="Agregar Nombre"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </form>
-              </div>
-
-              {/* 3. EVENTOS / TIPO DE INCIDENCIA */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
-                <div>
-                  <div className="flex justify-between items-center mb-3">
-                    <h3 className="font-bold text-sm text-[#023047] flex items-center">
-                      <AlertTriangle className="w-4 h-4 mr-1.5 text-[#FFB701]" /> Eventos ({catalogs.eventosList.length})
-                    </h3>
-                  </div>
-                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
-                    {catalogs.eventosList.map((ev, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
-                        <span className="font-medium text-slate-700">{ev}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteCatalogItem('eventosList', ev, 'Eventos')}
-                          className="text-slate-400 hover:text-red-500 hover:bg-red-50 p-1 rounded transition"
-                          title="Eliminar opción"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Add new event */}
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleAddCatalogItem('eventosList', newEvent, setNewEvent, 'Eventos');
-                  }}
-                  className="flex items-center space-x-1.5 pt-2 border-t border-slate-200"
-                >
-                  <input
-                    type="text"
-                    placeholder="Nuevo Tipo de Evento..."
-                    value={newEvent}
-                    onChange={(e) => setNewEvent(e.target.value)}
-                    className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#209EBB]"
-                  />
-                  <button
-                    type="submit"
-                    className="p-1.5 bg-[#209EBB] hover:bg-[#1a859e] text-white rounded-lg transition"
-                    title="Agregar Evento"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* MODAL / TAB LOGIN DE ADMINISTRADOR                                         */}
-        {/* ========================================================================= */}
-        {activeTab === 'login' && !isAdminLoggedIn && (
-          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-md border border-slate-200 p-8 my-8">
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 bg-[#023047] text-[#FFB701] rounded-2xl flex items-center justify-center mx-auto mb-3 shadow">
-                <Lock className="w-6 h-6" />
-              </div>
-              <h2 className="text-xl font-bold text-[#023047]">Iniciar Sesión Administrador</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Ingrese credenciales para editar registros, cambiar estados y modificar las listas del formulario.
-              </p>
-            </div>
-
-            {loginError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
-                {loginError}
-              </div>
-            )}
-
-            <form onSubmit={handleAdminLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Usuario</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="admin"
-                  value={adminUsername}
-                  onChange={(e) => setAdminUsername(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#209EBB]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="••••••••"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#209EBB]"
-                />
-              </div>
-
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full py-2.5 bg-[#023047] hover:bg-[#011e2d] text-white text-sm font-semibold rounded-lg shadow transition"
-                >
-                  Entrar como Administrador
-                </button>
-              </div>
-
-              <div className="text-center pt-2">
-                <p className="text-[11px] text-slate-400">Credenciales Demo: <b>admin</b> / <b>admin123</b></p>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {/* ========================================================================= */}
-        {/* MODAL DETALLE DE INCIDENCIA (MULTIMEDIA VIEWER)                           */}
-        {/* ========================================================================= */}
-        {selectedIncidentModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
-              <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-                <div>
-                  <h3 className="font-bold text-lg text-[#023047]">Detalle de la Incidencia</h3>
-                  <p className="text-xs text-slate-400">ID: {selectedIncidentModal.id}</p>
-                </div>
-                <button
-                  onClick={() => setSelectedIncidentModal(null)}
-                  className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-6">
-                {/* Information Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs bg-slate-50 p-4 rounded-xl border border-slate-100">
-                  <div>
-                    <span className="text-slate-400 block font-medium">Sucursal:</span>
-                    <span className="font-bold text-slate-800 text-sm">{selectedIncidentModal.sucursal}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">Evento:</span>
-                    <span className="font-bold text-[#209EBB] text-sm">{selectedIncidentModal.evento}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">Monto Total:</span>
-                    <span className="font-black text-slate-900 text-sm">
-                      ${parseFloat(selectedIncidentModal.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                  <div className="flex items-center space-x-2">
+                    <h1 className="font-bold text-lg leading-tight tracking-wide">REPORTE DE INCIDENCIAS</h1>
+                    <span className="flex items-center text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
+                      <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse"></span>
+                      Listo en Vercel
                     </span>
                   </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">Fecha:</span>
-                    <span className="font-semibold text-slate-700">{selectedIncidentModal.fecha}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">Hora Evento:</span>
-                    <span className="font-semibold text-slate-700">{selectedIncidentModal.horaEvento} hs</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400 block font-medium">Reportó:</span>
-                    <span className="font-semibold text-slate-700">{selectedIncidentModal.reporto}</span>
-                  </div>
-                  <div className="col-span-2 sm:col-span-3">
-                    <span className="text-slate-400 block font-medium">Quién Reporta (Detalle):</span>
-                    <span className="font-semibold text-slate-800">{selectedIncidentModal.quienReportaText}</span>
-                  </div>
-                </div>
-
-                {/* Multimedia Attachments */}
-                <div className="space-y-4">
-                  <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Archivos de Evidencia</h4>
-
-                  <MediaPreviewCard
-                    title="Foto del inventario (sustracción)"
-                    media={selectedIncidentModal.fotoInventario}
-                  />
-
-                  <MediaPreviewCard
-                    title="Foto del sospechoso"
-                    media={selectedIncidentModal.fotoSospechoso}
-                  />
-
-                  <MediaPreviewCard
-                    title="Evidencia de los hechos"
-                    media={selectedIncidentModal.evidenciaHechos}
-                  />
-
-                  <MediaPreviewCard
-                    title="Fotos del vehículo (tránsito terrestre)"
-                    media={selectedIncidentModal.fotosVehiculo}
-                  />
+                  <p className="text-xs text-[#8ECAE6]">Formulario de Captura • Tally Style</p>
                 </div>
               </div>
 
-              <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+              {/* NAVEGACIÓN */}
+              <nav className="flex items-center space-x-1 sm:space-x-2 bg-[#011e2d] p-1.5 rounded-xl text-sm font-medium">
                 <button
-                  onClick={() => setSelectedIncidentModal(null)}
-                  className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-medium text-xs rounded-lg transition"
+                  onClick={() => setActiveTab('formulario')}
+                  className={`flex items-center px-3 py-1.5 rounded-lg transition ${
+                    activeTab === 'formulario' ? 'bg-[#209EBB] text-white font-semibold shadow' : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  }`}
                 >
-                  Cerrar
+                  <IconPlusCircle className="w-4 h-4 mr-1.5" />
+                  Nuevo Reporte
                 </button>
+
+                <button
+                  onClick={() => setActiveTab('listado')}
+                  className={`flex items-center px-3 py-1.5 rounded-lg transition ${
+                    activeTab === 'listado' ? 'bg-[#209EBB] text-white font-semibold shadow' : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <IconClipboardList className="w-4 h-4 mr-1.5" />
+                  Historial ({incidents.length})
+                </button>
+
+                {isAdminLoggedIn && (
+                  <button
+                    onClick={() => setActiveTab('configuracion')}
+                    className={`flex items-center px-3 py-1.5 rounded-lg transition ${
+                      activeTab === 'configuracion' ? 'bg-[#FFB701] text-[#023047] font-bold shadow' : 'text-amber-300 hover:text-amber-100 hover:bg-white/10'
+                    }`}
+                  >
+                    <IconSettings className="w-4 h-4 mr-1.5" />
+                    Catálogos
+                  </button>
+                )}
+              </nav>
+
+              {/* SESIÓN DE USUARIO */}
+              <div className="flex items-center space-x-2">
+                {isAdminLoggedIn ? (
+                  <div className="flex items-center bg-[#FFB701]/20 border border-[#FFB701]/40 rounded-lg px-2.5 py-1 text-xs text-[#FFB701]">
+                    <IconLock className="w-3.5 h-3.5 mr-1" />
+                    <span className="font-semibold mr-2">Modo Admin</span>
+                    <button onClick={handleAdminLogout} className="hover:text-red-300 transition underline ml-1">Salir</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setActiveTab('login')}
+                    className="flex items-center text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg transition"
+                  >
+                    <IconLogIn className="w-3.5 h-3.5 mr-1 text-[#8ECAE6]" />
+                    Acceso Admin
+                  </button>
+                )}
               </div>
             </div>
-          </div>
-        )}
+          </header>
 
-        {}
-        {/* Notification Toast */}
-        {toast && (
-          <div className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl border text-xs font-semibold flex items-center space-x-2 animate-bounce ${
-            toast.type === 'error' ? 'bg-red-900 text-white border-red-700' :
-            toast.type === 'warning' ? 'bg-amber-500 text-white border-amber-600' :
-            toast.type === 'success' ? 'bg-emerald-600 text-white border-emerald-500' :
-            'bg-slate-800 text-white border-slate-700'
-          }`}>
-            <span>{toast.message}</span>
-            <button onClick={() => setToast(null)} className="ml-2 hover:opacity-80">
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
-
-        {/* Confirmation Modal */}
-        {confirmModal && (
-          <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
-              <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="font-bold text-base text-slate-800">{confirmModal.title}</h3>
-                <p className="text-xs text-slate-500 mt-1">{confirmModal.message}</p>
-              </div>
-              <div className="flex items-center justify-center space-x-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setConfirmModal(null)}
-                  className="px-4 py-2 border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg text-xs font-medium transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={confirmModal.onConfirm}
-                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow transition"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </main>
-    </div>
-  );
-}
-
-function UploadBox({ id, fileData, onChange, onRemove }) {
-  return (
-    <div className="mt-1">
-      {fileData ? (
-        <div className="relative border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center space-x-3 overflow-hidden">
-            {fileData.type?.startsWith('image/') ? (
-              <img src={fileData.data} alt="preview" className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
-            ) : fileData.type?.startsWith('video/') ? (
-              <video src={fileData.data} className="w-12 h-12 object-cover rounded-lg border border-slate-200" />
-            ) : (
-              <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center text-slate-500">
-                <UploadCloud className="w-6 h-6" />
+          {}
+          <main className="flex-1 max-w-4xl w-full mx-auto p-4 sm:p-6">
+            {successMsg && (
+              <div className="mb-6 p-4 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl flex items-center shadow-sm animate-fade-in">
+                <IconCheckCircle className="w-6 h-6 mr-3 text-emerald-600 flex-shrink-0" />
+                <p className="font-semibold text-sm">{successMsg}</p>
               </div>
             )}
-            <div className="truncate">
-              <p className="text-xs font-semibold text-slate-700 truncate">{fileData.name}</p>
-              <p className="text-[10px] text-emerald-600 font-medium">Archivo cargado correctamente</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onRemove}
-            className="p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
-            title="Quitar archivo"
-          >
-            <X className="w-4 h-4" />
-          </button>
+
+            {/* TAB 1: FORMULARIO MULTI-PASO */}
+            {activeTab === 'formulario' && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="p-6 sm:p-10 max-w-2xl mx-auto">
+                  <h2 className="text-2xl sm:text-3xl font-black text-[#023047] tracking-tight uppercase mb-8">
+                    REPORTE DE INCIDENCIAS
+                  </h2>
+
+                  <div className="flex items-center justify-between mb-8 pb-4 border-b border-slate-100 text-xs font-semibold text-slate-400">
+                    <span className={currentStep === 1 ? "text-[#209EBB] font-bold" : ""}>PASO 1 DE 2: INFORMACIÓN GENERAL</span>
+                    <span className={currentStep === 2 ? "text-[#209EBB] font-bold" : ""}>PASO 2 DE 2: DETALLES Y EVIDENCIAS</span>
+                  </div>
+
+                  <form onSubmit={handleSubmitForm}>
+                    {currentStep === 1 && (
+                      <div className="space-y-6 animate-fade-in">
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Fecha y hora: <span className="text-red-500">*</span>
+                          </label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <input
+                              type="date"
+                              required
+                              value={formData.fecha}
+                              onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            />
+                            <input
+                              type="time"
+                              required
+                              value={formData.horaForm}
+                              onChange={(e) => setFormData({ ...formData, horaForm: e.target.value })}
+                              className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="block text-sm font-semibold text-slate-800">
+                              Sucursal <span className="text-red-500">*</span>
+                            </label>
+                            {isAdminLoggedIn && (
+                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
+                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
+                              </button>
+                            )}
+                          </div>
+                          <select
+                            required
+                            value={formData.sucursal}
+                            onChange={(e) => setFormData({ ...formData, sucursal: e.target.value })}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                          >
+                            {catalogs.sucursales.map((suc, idx) => (
+                              <option key={idx} value={suc}>{suc}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Hora del evento: <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="time"
+                            required
+                            value={formData.horaEvento}
+                            onChange={(e) => setFormData({ ...formData, horaEvento: e.target.value })}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="block text-sm font-semibold text-slate-800">
+                              Reportó: <span className="text-red-500">*</span>
+                            </label>
+                            {isAdminLoggedIn && (
+                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
+                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
+                              </button>
+                            )}
+                          </div>
+                          <select
+                            required
+                            value={formData.reporto}
+                            onChange={(e) => setFormData({ ...formData, reporto: e.target.value })}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                          >
+                            {catalogs.reportoList.map((rep, idx) => (
+                              <option key={idx} value={rep}>{rep}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="pt-4">
+                          <button
+                            type="button"
+                            onClick={() => setCurrentStep(2)}
+                            className="inline-flex items-center px-6 py-2.5 bg-black hover:bg-slate-800 text-white font-medium text-sm rounded-lg transition shadow-sm"
+                          >
+                            Continuar <IconArrowRight className="w-4 h-4 ml-2" />
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {currentStep === 2 && (
+                      <div className="space-y-6 animate-fade-in">
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="block text-sm font-semibold text-slate-800">
+                              Evento: <span className="text-red-500">*</span>
+                            </label>
+                            {isAdminLoggedIn && (
+                              <button type="button" onClick={() => setActiveTab('configuracion')} className="text-xs text-[#209EBB] font-semibold flex items-center">
+                                <IconSettings className="w-3.5 h-3.5 mr-1 text-[#FFB701]" /> Gestionar Lista
+                              </button>
+                            )}
+                          </div>
+                          <select
+                            required
+                            value={formData.evento}
+                            onChange={(e) => setFormData({ ...formData, evento: e.target.value })}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                          >
+                            {catalogs.eventosList.map((ev, idx) => (
+                              <option key={idx} value={ev}>{ev}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Quien reporta: <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Nombre completo o cargo de quien reporta"
+                            value={formData.quienReportaText}
+                            onChange={(e) => setFormData({ ...formData, quienReportaText: e.target.value })}
+                            className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-1">
+                            Foto del inventario en caso de sustracción de mercancía:
+                          </label>
+                          <UploadBox
+                            id="fotoInventario"
+                            fileData={formData.fotoInventario}
+                            onChange={(e) => handleFileUpload(e, 'fotoInventario')}
+                            onRemove={() => setFormData({ ...formData, fotoInventario: null })}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-1">Foto del sospechoso:</label>
+                          <UploadBox
+                            id="fotoSospechoso"
+                            fileData={formData.fotoSospechoso}
+                            onChange={(e) => handleFileUpload(e, 'fotoSospechoso')}
+                            onRemove={() => setFormData({ ...formData, fotoSospechoso: null })}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-2">
+                            Monto Total <span className="text-red-500">*</span>
+                          </label>
+                          <div className="relative">
+                            <span className="absolute left-3.5 top-2.5 text-slate-400 font-medium text-sm">$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              required
+                              placeholder="0.00"
+                              value={formData.montoTotal}
+                              onChange={(e) => setFormData({ ...formData, montoTotal: e.target.value })}
+                              className="w-full pl-8 pr-3.5 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#209EBB] text-sm text-slate-700 bg-slate-50/50"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-1">Evidencia de los hechos:</label>
+                          <UploadBox
+                            id="evidenciaHechos"
+                            fileData={formData.evidenciaHechos}
+                            onChange={(e) => handleFileUpload(e, 'evidenciaHechos')}
+                            onRemove={() => setFormData({ ...formData, evidenciaHechos: null })}
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-semibold text-slate-800 mb-1 leading-snug">
+                            En caso de que la incidencia sea "HECHO DE TRANSITO TERRESTRE" favor de subir las fotos del vehículo:
+                          </label>
+                          <UploadBox
+                            id="fotosVehiculo"
+                            fileData={formData.fotosVehiculo}
+                            onChange={(e) => handleFileUpload(e, 'fotosVehiculo')}
+                            onRemove={() => setFormData({ ...formData, fotosVehiculo: null })}
+                          />
+                        </div>
+
+                        <div className="pt-6 flex items-center justify-between border-t border-slate-100">
+                          <button
+                            type="button"
+                            onClick={() => setCurrentStep(1)}
+                            className="inline-flex items-center px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 font-medium text-sm rounded-lg transition"
+                          >
+                            <IconArrowLeft className="w-4 h-4 mr-1.5" /> Volver al Paso 1
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={submitting}
+                            className="inline-flex items-center px-8 py-2.5 bg-black hover:bg-slate-800 text-white font-semibold text-sm rounded-lg transition shadow hover:shadow-md disabled:opacity-50"
+                          >
+                            {submitting ? (
+                              <><IconRefreshCw className="w-4 h-4 mr-2 animate-spin" /> Guardando...</>
+                            ) : (
+                              <><IconArrowRight className="w-4 h-4 ml-2" /> Enviar</>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </form>
+                </div>
+              </div>
+            )}
+
+            {/* TAB 2: LISTADO DE INCIDENCIAS */}
+            {activeTab === 'listado' && (
+              <div className="space-y-4 animate-fade-in">
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-center justify-between">
+                  <div className="flex-1 w-full md:w-auto relative">
+                    <IconSearch className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="Buscar por sucursal, evento, reportó..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#209EBB]"
+                    />
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                    <select
+                      value={filterSucursal}
+                      onChange={(e) => setFilterSucursal(e.target.value)}
+                      className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
+                    >
+                      <option value="ALL">Todas las Sucursales</option>
+                      {catalogs.sucursales.map((s, i) => (
+                        <option key={i} value={s}>{s}</option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={filterEvento}
+                      onChange={(e) => setFilterEvento(e.target.value)}
+                      className="px-3 py-2 text-xs border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
+                    >
+                      <option value="ALL">Todos los Eventos</option>
+                      {catalogs.eventosList.map((ev, i) => (
+                        <option key={i} value={ev}>{ev}</option>
+                      ))}
+                    </select>
+
+                    <button
+                      onClick={exportToExcel}
+                      className="flex items-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+                    >
+                      <IconFileSpreadsheet className="w-4 h-4 mr-1.5" /> Exportar CSV
+                    </button>
+                  </div>
+                </div>
+
+                {filteredIncidents.length === 0 ? (
+                  <div className="bg-white p-12 rounded-2xl text-center border border-slate-200">
+                    <IconAlertTriangle className="w-10 h-10 mx-auto text-amber-400 mb-2" />
+                    <h3 className="font-bold text-slate-700 text-lg">No hay incidencias registradas</h3>
+                    <p className="text-xs text-slate-500 mt-1">Intenta ajustando los filtros o realiza un nuevo reporte.</p>
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs text-slate-600">
+                        <thead className="bg-[#023047] text-[#8ECAE6] uppercase font-bold text-[11px] tracking-wider">
+                          <tr>
+                            <th className="p-3">Fecha / Hora</th>
+                            <th className="p-3">Sucursal</th>
+                            <th className="p-3">Evento</th>
+                            <th className="p-3">Reportó</th>
+                            <th className="p-3">Monto</th>
+                            <th className="p-3">Archivos</th>
+                            <th className="p-3">Estado</th>
+                            <th className="p-3 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredIncidents.map((inc) => (
+                            <tr key={inc.id} className="hover:bg-slate-50 transition">
+                              <td className="p-3 whitespace-nowrap">
+                                <div className="font-medium text-slate-800">{inc.fecha}</div>
+                                <div className="text-[11px] text-slate-400">{inc.horaEvento || inc.horaForm} hs</div>
+                              </td>
+                              <td className="p-3 font-semibold text-[#023047]">{inc.sucursal}</td>
+                              <td className="p-3">
+                                <span className="inline-block bg-[#8ECAE6]/30 text-[#023047] font-semibold px-2 py-0.5 rounded">
+                                  {inc.evento}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                <div className="font-medium text-slate-800">{inc.reporto}</div>
+                                <div className="text-[10px] text-slate-400">{inc.quienReportaText}</div>
+                              </td>
+                              <td className="p-3 font-bold text-slate-900">
+                                ${parseFloat(inc.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                              </td>
+                              <td className="p-3">
+                                <div className="flex items-center space-x-1">
+                                  {inc.fotoInventario && <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">Inv</span>}
+                                  {inc.fotoSospechoso && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-[10px] font-bold rounded">Sosp</span>}
+                                  {inc.evidenciaHechos && <span className="px-1.5 py-0.5 bg-amber-100 text-amber-700 text-[10px] font-bold rounded">Evid</span>}
+                                  {inc.fotosVehiculo && <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-700 text-[10px] font-bold rounded">Veh</span>}
+                                </div>
+                              </td>
+                              <td className="p-3">
+                                {isAdminLoggedIn ? (
+                                  <select
+                                    value={inc.status || 'REGISTRADO'}
+                                    onChange={(e) => handleUpdateStatus(inc.id, e.target.value)}
+                                    className="text-[11px] border border-slate-200 rounded px-1.5 py-0.5 bg-slate-50 font-medium"
+                                  >
+                                    <option value="REGISTRADO">REGISTRADO</option>
+                                    <option value="EN REVISIÓN">EN REVISIÓN</option>
+                                    <option value="RESUELTO">RESUELTO</option>
+                                  </select>
+                                ) : (
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    inc.status === 'RESUELTO' ? 'bg-emerald-100 text-emerald-800' :
+                                    inc.status === 'EN REVISIÓN' ? 'bg-amber-100 text-amber-800' :
+                                    'bg-slate-100 text-slate-700'
+                                  }`}>
+                                    {inc.status || 'REGISTRADO'}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-right whitespace-nowrap">
+                                <button
+                                  onClick={() => setSelectedIncidentModal(inc)}
+                                  className="p-1.5 text-slate-600 hover:text-[#209EBB] bg-slate-100 hover:bg-slate-200 rounded-md mr-1 transition"
+                                  title="Ver Detalle"
+                                >
+                                  <IconEye className="w-4 h-4" />
+                                </button>
+                                {isAdminLoggedIn && (
+                                  <button
+                                    onClick={() => handleDeleteIncident(inc.id)}
+                                    className="p-1.5 text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded-md transition"
+                                    title="Eliminar Incidencia"
+                                  >
+                                    <IconTrash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: CONFIGURACIÓN DE CATÁLOGOS */}
+            {activeTab === 'configuracion' && isAdminLoggedIn && (
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8 space-y-8 animate-fade-in">
+                <div className="border-b border-slate-100 pb-4">
+                  <h2 className="text-xl font-bold text-[#023047] flex items-center">
+                    <IconSettings className="w-5 h-5 mr-2 text-[#FFB701]" /> Gestión de Listas y Catálogos
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Agrega o elimina elementos de las listas del formulario.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* SUCURSALES */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-[#023047] flex items-center mb-3">
+                        <IconMapPin className="w-4 h-4 mr-1.5 text-[#209EBB]" /> Sucursales ({catalogs.sucursales.length})
+                      </h3>
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
+                        {catalogs.sucursales.map((suc, i) => (
+                          <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
+                            <span className="font-medium text-slate-700">{suc}</span>
+                            <button onClick={() => handleDeleteCatalogItem('sucursales', suc, 'Sucursales')} className="text-slate-400 hover:text-red-500 p-1">
+                              <IconX className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('sucursales', newSucursal, setNewSucursal, 'Sucursales'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                      <input type="text" placeholder="Nueva Sucursal..." value={newSucursal} onChange={(e) => setNewSucursal(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
+                      <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
+                    </form>
+                  </div>
+
+                  {/* REPORTÓ */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-[#023047] flex items-center mb-3">
+                        <IconUser className="w-4 h-4 mr-1.5 text-[#209EBB]" /> Reportó ({catalogs.reportoList.length})
+                      </h3>
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
+                        {catalogs.reportoList.map((rep, i) => (
+                          <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
+                            <span className="font-medium text-slate-700">{rep}</span>
+                            <button onClick={() => handleDeleteCatalogItem('reportoList', rep, 'Reportó')} className="text-slate-400 hover:text-red-500 p-1">
+                              <IconX className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('reportoList', newReporto, setNewReporto, 'Reportó'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                      <input type="text" placeholder="Nuevo Nombre..." value={newReporto} onChange={(e) => setNewReporto(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
+                      <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
+                    </form>
+                  </div>
+
+                  {/* EVENTOS */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between">
+                    <div>
+                      <h3 className="font-bold text-sm text-[#023047] flex items-center mb-3">
+                        <IconAlertTriangle className="w-4 h-4 mr-1.5 text-[#FFB701]" /> Eventos ({catalogs.eventosList.length})
+                      </h3>
+                      <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1 mb-4">
+                        {catalogs.eventosList.map((ev, i) => (
+                          <div key={i} className="flex items-center justify-between bg-white px-3 py-1.5 rounded-lg border border-slate-200 text-xs shadow-sm">
+                            <span className="font-medium text-slate-700">{ev}</span>
+                            <button onClick={() => handleDeleteCatalogItem('eventosList', ev, 'Eventos')} className="text-slate-400 hover:text-red-500 p-1">
+                              <IconX className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <form onSubmit={(e) => { e.preventDefault(); handleAddCatalogItem('eventosList', newEvent, setNewEvent, 'Eventos'); }} className="flex items-center space-x-1.5 pt-2 border-t border-slate-200">
+                      <input type="text" placeholder="Nuevo Evento..." value={newEvent} onChange={(e) => setNewEvent(e.target.value)} className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-lg" />
+                      <button type="submit" className="p-1.5 bg-[#209EBB] text-white rounded-lg"><IconPlus className="w-4 h-4" /></button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* LOGIN DE ADMINISTRADOR */}
+            {activeTab === 'login' && !isAdminLoggedIn && (
+              <div className="max-w-md mx-auto bg-white rounded-2xl shadow-md border border-slate-200 p-8 my-8 animate-fade-in">
+                <div className="text-center mb-6">
+                  <div className="w-12 h-12 bg-[#023047] text-[#FFB701] rounded-2xl flex items-center justify-center mx-auto mb-3 shadow">
+                    <IconLock className="w-6 h-6" />
+                  </div>
+                  <h2 className="text-xl font-bold text-[#023047]">Iniciar Sesión Administrador</h2>
+                  <p className="text-xs text-slate-500 mt-1">Credenciales para modificar catálogos y gestionar estados.</p>
+                </div>
+
+                {loginError && (
+                  <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
+                    {loginError}
+                  </div>
+                )}
+
+                <form onSubmit={handleAdminLogin} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Usuario</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="admin"
+                      value={adminUsername}
+                      onChange={(e) => setAdminUsername(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Contraseña</label>
+                    <input
+                      type="password"
+                      required
+                      placeholder="••••••••"
+                      value={adminPassword}
+                      onChange={(e) => setAdminPassword(e.target.value)}
+                      className="w-full px-3.5 py-2 text-sm border border-slate-300 rounded-lg"
+                    />
+                  </div>
+
+                  <button type="submit" className="w-full py-2.5 bg-[#023047] text-white text-sm font-semibold rounded-lg shadow">
+                    Entrar como Administrador
+                  </button>
+
+                  <p className="text-center text-[11px] text-slate-400 pt-2">Credenciales Demo: <b>admin</b> / <b>admin123</b></p>
+                </form>
+              </div>
+            )}
+
+            {/* MODAL DETALLE DE INCIDENCIA */}
+            {selectedIncidentModal && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+                    <div>
+                      <h3 className="font-bold text-lg text-[#023047]">Detalle de la Incidencia</h3>
+                      <p className="text-xs text-slate-400">ID: {selectedIncidentModal.id}</p>
+                    </div>
+                    <button onClick={() => setSelectedIncidentModal(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100">
+                      <IconX className="w-5 h-5" />
+                    </button>
+                  </div>
+
+                  <div className="p-6 space-y-6">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 text-xs bg-slate-50 p-4 rounded-xl border border-slate-100">
+                      <div>
+                        <span className="text-slate-400 block font-medium">Sucursal:</span>
+                        <span className="font-bold text-slate-800 text-sm">{selectedIncidentModal.sucursal}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Evento:</span>
+                        <span className="font-bold text-[#209EBB] text-sm">{selectedIncidentModal.evento}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Monto Total:</span>
+                        <span className="font-black text-slate-900 text-sm">
+                          ${parseFloat(selectedIncidentModal.montoTotal || 0).toLocaleString('es-MX', { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Fecha:</span>
+                        <span className="font-semibold text-slate-700">{selectedIncidentModal.fecha}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Hora Evento:</span>
+                        <span className="font-semibold text-slate-700">{selectedIncidentModal.horaEvento} hs</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block font-medium">Reportó:</span>
+                        <span className="font-semibold text-slate-700">{selectedIncidentModal.reporto}</span>
+                      </div>
+                      <div className="col-span-2 sm:col-span-3">
+                        <span className="text-slate-400 block font-medium">Quién Reporta (Detalle):</span>
+                        <span className="font-semibold text-slate-800">{selectedIncidentModal.quienReportaText}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h4 className="font-bold text-xs text-slate-500 uppercase tracking-wider">Archivos de Evidencia</h4>
+                      <MediaPreviewCard title="Foto del inventario (sustracción)" media={selectedIncidentModal.fotoInventario} />
+                      <MediaPreviewCard title="Foto del sospechoso" media={selectedIncidentModal.fotoSospechoso} />
+                      <MediaPreviewCard title="Evidencia de los hechos" media={selectedIncidentModal.evidenciaHechos} />
+                      <MediaPreviewCard title="Fotos del vehículo (tránsito terrestre)" media={selectedIncidentModal.fotosVehiculo} />
+                    </div>
+                  </div>
+
+                  <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
+                    <button onClick={() => setSelectedIncidentModal(null)} className="px-5 py-2 bg-slate-800 text-white font-medium text-xs rounded-lg">
+                      Cerrar
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* NOTIFICACIONES Y CONFIRMACIONES */}
+            {toast && (
+              <div className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-xl shadow-xl text-xs font-semibold flex items-center space-x-2 ${
+                toast.type === 'error' ? 'bg-red-900 text-white' :
+                toast.type === 'warning' ? 'bg-amber-500 text-white' :
+                toast.type === 'success' ? 'bg-emerald-600 text-white' :
+                'bg-slate-800 text-white'
+              }`}>
+                <span>{toast.message}</span>
+                <button onClick={() => setToast(null)} className="ml-2"><IconX className="w-3.5 h-3.5" /></button>
+              </div>
+            )}
+
+            {confirmModal && (
+              <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center space-y-4">
+                  <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto">
+                    <IconAlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-base text-slate-800">{confirmModal.title}</h3>
+                    <p className="text-xs text-slate-500 mt-1">{confirmModal.message}</p>
+                  </div>
+                  <div className="flex items-center justify-center space-x-3 pt-2">
+                    <button onClick={() => setConfirmModal(null)} className="px-4 py-2 border border-slate-300 text-slate-600 rounded-lg text-xs">Cancelar</button>
+                    <button onClick={confirmModal.onConfirm} className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold shadow">Confirmar</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </main>
         </div>
-      ) : (
-        <label
-          htmlFor={id}
-          className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50/80 transition group"
-        >
-          <UploadCloud className="w-6 h-6 text-slate-400 group-hover:text-[#209EBB] mb-2 transition" />
-          <p className="text-xs text-slate-600 font-medium text-center">
-            <span className="underline text-slate-700">Selecciona para obtener el archivo</span> o arrástralo hasta aquí
-          </p>
-          <p className="text-[10px] text-slate-400 mt-1">Tamaño permitido: 10 MB (Imágenes o Videos)</p>
-          <input
-            id={id}
-            type="file"
-            accept="image/*,video/*"
-            onChange={onChange}
-            className="hidden"
-          />
-        </label>
-      )}
-    </div>
-  );
-}
+      );
+    }
 
-function MediaPreviewCard({ title, media }) {
-  if (!media) {
-    return (
-      <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-xs text-slate-400 flex items-center justify-between">
-        <span>{title}</span>
-        <span className="italic">No adjuntado</span>
-      </div>
-    );
-  }
+    function UploadBox({ id, fileData, onChange, onRemove }) {
+      return (
+        <div className="mt-1">
+          {fileData ? (
+            <div className="relative border border-slate-200 rounded-xl p-3 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center space-x-3 overflow-hidden">
+                {fileData.type?.startsWith('image/') ? (
+                  <img src={fileData.data} alt="preview" className="w-12 h-12 object-cover rounded-lg border" />
+                ) : (
+                  <div className="w-12 h-12 bg-slate-200 rounded-lg flex items-center justify-center"><IconUploadCloud className="w-6 h-6 text-slate-500" /></div>
+                )}
+                <div className="truncate">
+                  <p className="text-xs font-semibold text-slate-700 truncate">{fileData.name}</p>
+                  <p className="text-[10px] text-emerald-600 font-medium">Cargado correctamente</p>
+                </div>
+              </div>
+              <button type="button" onClick={onRemove} className="p-1.5 text-slate-400 hover:text-red-500"><IconX className="w-4 h-4" /></button>
+            </div>
+          ) : (
+            <label htmlFor={id} className="border-2 border-dashed border-slate-300 rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer hover:border-[#209EBB] hover:bg-slate-50 transition">
+              <IconUploadCloud className="w-6 h-6 text-slate-400 mb-2" />
+              <p className="text-xs text-slate-600 font-medium text-center">
+                <span className="underline text-slate-700">Selecciona un archivo</span> o arrástralo aquí
+              </p>
+              <p className="text-[10px] text-slate-400 mt-1">Máximo 10 MB (Imágenes o Videos)</p>
+              <input id={id} type="file" accept="image/*,video/*" onChange={onChange} className="hidden" />
+            </label>
+          )}
+        </div>
+      );
+    }
 
-  return (
-    <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-semibold text-slate-700">{title}</span>
-        <a
-          href={media.data}
-          download={media.name || 'evidencia'}
-          className="text-[#209EBB] hover:underline text-[11px] font-medium"
-        >
-          Descargar
-        </a>
-      </div>
-      <div className="rounded-lg overflow-hidden border border-slate-100 bg-slate-900 max-h-64 flex items-center justify-center">
-        {media.type?.startsWith('image/') ? (
-          <img src={media.data} alt={title} className="max-h-64 object-contain" />
-        ) : media.type?.startsWith('video/') ? (
-          <video src={media.data} controls className="max-h-64 w-full" />
-        ) : (
-          <div className="p-4 text-white text-xs">Vista previa no disponible</div>
-        )}
-      </div>
-    </div>
-  );
-}
+    function MediaPreviewCard({ title, media }) {
+      if (!media) {
+        return (
+          <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg text-xs text-slate-400 flex items-center justify-between">
+            <span>{title}</span>
+            <span className="italic">No adjuntado</span>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700">{title}</span>
+            <a href={media.data} download={media.name || 'evidencia'} className="text-[#209EBB] hover:underline text-[11px] font-medium">Descargar</a>
+          </div>
+          <div className="rounded-lg overflow-hidden border border-slate-100 bg-slate-900 max-h-64 flex items-center justify-center">
+            {media.type?.startsWith('image/') ? (
+              <img src={media.data} alt={title} className="max-h-64 object-contain" />
+            ) : media.type?.startsWith('video/') ? (
+              <video src={media.data} controls className="max-h-64 w-full" />
+            ) : (
+              <div className="p-4 text-white text-xs">Vista previa no disponible</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Renderizado en DOM
+    const rootElement = document.getElementById('root');
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(<App />);
+  </script>
+</body>
+</html>
