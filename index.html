@@ -59,6 +59,7 @@
     const IconUploadCloud = (p) => <IconWrapper {...p}><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/><polyline points="16 16 12 12 8 16"/></IconWrapper>;
     const IconX = (p) => <IconWrapper {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconWrapper>;
     const IconSearch = (p) => <IconWrapper {...p}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></IconWrapper>;
+    const IconFileSpreadsheet = (p) => <IconWrapper {...p}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h8"/><path d="M12 13v8"/></IconWrapper>;
     const IconEye = (p) => <IconWrapper {...p}><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></IconWrapper>;
     const IconEdit = (p) => <IconWrapper {...p}><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></IconWrapper>;
     const IconTrash2 = (p) => <IconWrapper {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconWrapper>;
@@ -261,6 +262,38 @@
         reader.readAsDataURL(file);
       };
 
+      // EXPORTAR A CSV / EXCEL
+      const exportToExcel = () => {
+        if (incidents.length === 0) {
+          showToast("No hay registros disponibles para exportar.", "warning");
+          return;
+        }
+
+        const headers = ["ID", "Fecha", "Hora Registro", "Sucursal", "Hora Evento", "Reportó", "Evento", "Quien Reporta", "Monto Total", "Estado"];
+        const rows = incidents.map((inc) => [
+          inc.id,
+          inc.fecha || '',
+          inc.horaForm || '',
+          `"${inc.sucursal || ''}"`,
+          inc.horaEvento || '',
+          `"${inc.reporto || ''}"`,
+          `"${inc.evento || ''}"`,
+          `"${inc.quienReportaText || ''}"`,
+          inc.montoTotal || '0',
+          inc.status || 'REGISTRADO'
+        ]);
+
+        const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `Reporte_Incidencias_${new Date().toISOString().slice(0, 10)}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast("Reporte descargado exitosamente.", "success");
+      };
+
       const handleAdminLogin = (e) => {
         e.preventDefault();
         if (adminUsername.toLowerCase() === 'admin' && adminPassword === 'admin123') {
@@ -340,7 +373,7 @@
 
       const handleSaveEdit = async (e) => {
         e.preventDefault();
-        if (!editingIncident) return;
+        if (!editingIncident || !isAdminLoggedIn) return;
         setSavingEdit(true);
 
         const updatedDataSupabase = {
@@ -733,6 +766,14 @@
                     >
                       <IconRefreshCw className={`w-3.5 h-3.5 mr-1 ${loadingData ? 'animate-spin' : ''}`} /> Actualizar
                     </button>
+
+                    {/* BOTÓN DESCARGAR EXCEL / CSV */}
+                    <button
+                      onClick={exportToExcel}
+                      className="flex items-center px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+                    >
+                      <IconFileSpreadsheet className="w-4 h-4 mr-1.5" /> Exportar CSV
+                    </button>
                   </div>
                 </div>
 
@@ -806,13 +847,19 @@
                                 >
                                   <IconEye className="w-4 h-4" />
                                 </button>
-                                <button
-                                  onClick={() => setEditingIncident({ ...inc })}
-                                  className="p-1.5 text-amber-700 bg-amber-100 rounded-md mr-1"
-                                  title="Editar"
-                                >
-                                  <IconEdit className="w-4 h-4" />
-                                </button>
+
+                                {/* SOLAMENTE EL ADMIN PUEDE EDITAR */}
+                                {isAdminLoggedIn && (
+                                  <button
+                                    onClick={() => setEditingIncident({ ...inc })}
+                                    className="p-1.5 text-amber-700 bg-amber-100 rounded-md mr-1"
+                                    title="Editar"
+                                  >
+                                    <IconEdit className="w-4 h-4" />
+                                  </button>
+                                )}
+
+                                {/* SOLAMENTE EL ADMIN PUEDE ELIMINAR */}
                                 {isAdminLoggedIn && (
                                   <button
                                     onClick={() => handleDeleteIncident(inc.id)}
@@ -1006,15 +1053,18 @@
                   </div>
 
                   <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-                    <button
-                      onClick={() => {
-                        setEditingIncident({ ...selectedIncidentModal });
-                        setSelectedIncidentModal(null);
-                      }}
-                      className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-lg shadow transition"
-                    >
-                      <IconEdit className="w-3.5 h-3.5 mr-1.5" /> Editar o Añadir Fotos
-                    </button>
+                    {/* BOTÓN EDITAR EN MODAL SOLO PARA ADMIN */}
+                    {isAdminLoggedIn ? (
+                      <button
+                        onClick={() => {
+                          setEditingIncident({ ...selectedIncidentModal });
+                          setSelectedIncidentModal(null);
+                        }}
+                        className="inline-flex items-center px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs rounded-lg shadow transition"
+                      >
+                        <IconEdit className="w-3.5 h-3.5 mr-1.5" /> Editar o Añadir Fotos
+                      </button>
+                    ) : <div />}
                     <button onClick={() => setSelectedIncidentModal(null)} className="px-5 py-2 bg-slate-800 text-white font-medium text-xs rounded-lg">
                       Cerrar
                     </button>
@@ -1023,8 +1073,8 @@
               </div>
             )}
 
-            {/* MODAL EDITAR INCIDENCIA */}
-            {editingIncident && (
+            {/* MODAL EDITAR INCIDENCIA (SOLO ACCESIBLE CON ADMIN) */}
+            {editingIncident && isAdminLoggedIn && (
               <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
                   <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
